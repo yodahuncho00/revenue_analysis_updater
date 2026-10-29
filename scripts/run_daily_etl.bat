@@ -4,6 +4,7 @@ cd /d "%~dp0\.."
 if not exist data\logs mkdir data\logs
 set "PYTHON=%CD%\.venv\Scripts\python.exe"
 set "ALERT_FILE=%CD%\ATTENTION - Revenue update failed.txt"
+if /I "%~1"=="--test-alert" goto test_alert
 echo [%DATE% %TIME%] Starting daily Revenue Analysis ETL run... >> data\logs\scheduler.log
 "%PYTHON%" main.py >> data\logs\scheduler.log 2>&1
 set "ETL_EXIT=%ERRORLEVEL%"
@@ -35,6 +36,16 @@ echo [%DATE% %TIME%] FAILED at %FAILED_STAGE%; exit code %ETL_EXIT%. >> data\log
   echo If it still fails, send this file and data\logs\scheduler.log to your support contact.
 ) > "%ALERT_FILE%"
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0show_failure_alert.ps1" -AlertFile "%ALERT_FILE%"
+goto finished
+:test_alert
+echo [%DATE% %TIME%] Showing a test failure alert; ETL is not running. >> data\logs\scheduler.log
+(
+  echo TEST ALERT ONLY - the ETL and workbook were not run or changed.
+  echo This is the failure popup test. Close this message to finish.
+) > "%ALERT_FILE%"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0show_failure_alert.ps1" -AlertFile "%ALERT_FILE%"
+del "%ALERT_FILE%"
+exit /b 0
 :finished
 echo [%DATE% %TIME%] Daily job completed with exit code %ETL_EXIT% >> data\logs\scheduler.log
 exit /b %ETL_EXIT%

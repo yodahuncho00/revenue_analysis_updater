@@ -35,6 +35,11 @@ The scheduled task calls `scripts\run_daily_etl.bat`. After a successful ETL com
 scripts\run_daily_etl.bat
 ```
 
+To verify that Windows popups are visible without running the ETL or changing the workbook, run:
+```powershell
+scripts\run_daily_etl.bat --test-alert
+```
+
 The dashboard output and workbook are local generated/private files and are ignored by Git. The HTML template is `templates/05. Revenue_dashboard.template.html`.
 
 ## Keep one runner per workbook
