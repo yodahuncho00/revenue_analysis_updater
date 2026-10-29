@@ -1,0 +1,14 @@
+# Per-machine Python/browser state
+.venv/
+**/__pycache__/
+.pytest_cache/
+data/
+
+# Private financial workbooks and generated dashboard output
+05. Revenue_analysis*.xlsx
+05. Revenue_dashboard.html
+*.working.xlsx
+*.lock
+
+# Local-only scratch work
+scratch/

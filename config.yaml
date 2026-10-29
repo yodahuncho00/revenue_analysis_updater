@@ -1,0 +1,103 @@
+# Configuration for Autonomous Daily Revenue Analysis ETL Job
+
+app:
+  name: "revenue_analysis_updater"
+  version: "1.0.0"
+  timezone: "Etc/GMT-3"  # UTC+3
+  backups_to_retain: 30
+  first_of_month_behavior: "process_prior_month"  # "process_prior_month" or "skip_steps_1_6"
+
+paths:
+  workbook_path: "05. Revenue_analysis.xlsx"
+  backup_dir: "data/backups"
+  raw_dir: "data/raw"
+  reports_dir: "data/reports"
+  exports_dir: "data/exports"
+  storage_state_path: "data/storage_state.json"
+  browser_profile_dir: "%LOCALAPPDATA%\\RevenueAnalysisUpdater\\BackofficeProfile"
+  fixtures_dir: "data/fixtures"
+
+backoffice:
+  base_url: "https://backoffice.zoyktech.com"
+  login_url: "https://backoffice.zoyktech.com/login"
+  routes:
+    dashboard: "https://backoffice.zoyktech.com/wl_partner/8/dashboard"
+    merchant_balance: "https://backoffice.zoyktech.com/wl_partner/8/balance"
+    provider_balance: "https://backoffice.zoyktech.com/wl_partner/8/balance/providers"
+    settlements: "https://backoffice.zoyktech.com/wl_partner/8/settlements?rowsPerPage=100"
+    top_ups: "https://backoffice.zoyktech.com/wl_partner/8/top_ups?rowsPerPage=100"
+  browser:
+    headless: true
+    timeout_ms: 30000
+    transaction_export_timeout_ms: 120000
+    viewport:
+      width: 1920
+      height: 1080
+
+tolerances:
+  hierarchy_additive: 0.15
+  revenue_identity_lcy: 10.0
+  share_identity_usd: 0.01
+  direction_identity_usd: 1.0
+
+sheets:
+  bo_extract:
+    name: "BO_extract"
+    filter_column_index: 24  # Col X
+    filter_formula: '=IF(G{row}="",0,1)'
+    header_row: 1
+    start_col: 1
+    end_col: 27
+  data:
+    name: "Data"
+    header_row: 4
+    data_start_row: 5
+    max_prefilled_row: 2000
+    pasted_cols_end: 22  # Cols A:V
+    formula_cols:
+      J: '=IFERROR(I{row}/H{row}*100,0)'
+      L: '=IFERROR(K{row}/H{row}*100,0)'
+      O: '=IFERROR(N{row}/M{row}*100,0)'
+      Q: '=IFERROR(P{row}/M{row}*100,0)'
+  bo_merchant_balance:
+    name: "BO_merchant_balance"
+    header_row: 4
+    data_start_row: 4
+    summary_row: 2
+    summary_formula_start_row: 6
+    summary_cols: ["D", "E", "F"]
+    filter_col: "I"
+    helper_cols: ["I", "U"]
+    helper_number_format: '_(* # ##0_);_(* (# ##0);_(* "-"??_);_(@_)'
+  bo_provider_balance:
+    name: "BO_provider_balance"
+    header_row: 4
+    data_start_row: 6
+    summary_row: 2
+    summary_formula_start_row: 6
+    summary_cols: ["F", "G", "H"]
+    filter_col: "K"
+    helper_cols: ["K", "T"]
+    helper_number_format: '_(* # ##0_);_(* (# ##0);_(* "-"??_);_(@_)'
+  bo_settlements:
+    name: "BO_settlements"
+    header_row: 1
+    data_start_row: 2
+    id_col: "A"
+    date_col: "B"
+    year_col: "L"
+    month_col: "M"
+  bo_topups:
+    name: "BO_topups"
+    header_row: 1
+    data_start_row: 2
+    id_col: "A"
+    date_col: "B"
+    year_col: "L"
+    month_col: "M"
+  control:
+    name: "Control"
+    as_of_label: "Data as-of date (last day in the export)"
+    rpt_month_label: "Reporting month (month-end)"
+    checks_start_row: 68
+    checks_end_row: 78
