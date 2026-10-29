@@ -9,6 +9,7 @@ data/
 05. Revenue_dashboard.html
 *.working.xlsx
 *.lock
+ATTENTION - Revenue update failed.txt
 
 # Local-only scratch work
 scratch/

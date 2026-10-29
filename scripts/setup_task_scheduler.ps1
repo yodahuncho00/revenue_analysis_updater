@@ -12,7 +12,7 @@ Write-Host "Batch Executable: $BatPath"
 
 $Action = New-ScheduledTaskAction -Execute $BatPath -WorkingDirectory $ProjectDir
 $Trigger = New-ScheduledTaskTrigger -Daily -At "08:30"
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "Daily ETL and Revenue Dashboard refresh" -Force -ErrorAction Stop

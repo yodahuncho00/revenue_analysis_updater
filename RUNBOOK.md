@@ -184,7 +184,11 @@ PowerShell prompt in the project directory:
 powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
 ```
 The task runs the ETL and, only after a successful workbook update, regenerates
-`05. Revenue_dashboard.html` from the updated workbook. Its log is
+`05. Revenue_dashboard.html` from the updated workbook. It is configured to wake
+the computer from sleep when Windows and the hardware permit wake timers, and to
+start a missed run once the computer is available. It cannot start a computer that
+is fully powered off. If a run fails, it writes `ATTENTION - Revenue update failed.txt`
+and displays a Windows popup with recovery steps. Its detailed log is
 `data\logs\scheduler.log`. To run the same sequence manually, run
 `scripts\run_daily_etl.bat`.
 

@@ -25,11 +25,11 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
    ```
-   The task runs as the current interactive Windows user. That user must be logged in, and Excel must be available. Backoffice may request OTP again when its session expires.
+   The task runs as the current interactive Windows user. That user must be logged in, and Excel must be available. The task can wake the computer from sleep if Windows power settings and hardware allow wake timers. Backoffice may request OTP again when its session expires.
 
 ## Daily workflow
 
-The scheduled task calls `scripts\run_daily_etl.bat`. After a successful ETL commit, it runs `scripts\update_revenue_dashboard.py` to build `05. Revenue_dashboard.html` from the workbook. Failures are logged in `data\logs\scheduler.log`. You can run the same sequence manually with:
+The scheduled task calls `scripts\run_daily_etl.bat`. After a successful ETL commit, it runs `scripts\update_revenue_dashboard.py` to build `05. Revenue_dashboard.html` from the workbook. A failure creates `ATTENTION - Revenue update failed.txt` and displays a Windows popup with simple recovery steps. Failures are also logged in `data\logs\scheduler.log`. You can run the same sequence manually with:
 
 ```powershell
 scripts\run_daily_etl.bat
