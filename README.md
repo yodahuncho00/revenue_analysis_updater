@@ -16,6 +16,13 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
    ```
+   The installer uses Windows' trusted certificate store for the Chromium download.
+   If you already ran it and saw `unable to verify the first certificate`, retry with:
+   ```powershell
+   $env:NODE_USE_SYSTEM_CA = "1"
+   $env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000"
+   .venv\Scripts\python.exe -m playwright install chromium
+   ```
 6. Authenticate this computer interactively. Run the command below, sign in and complete OTP in the browser, then press Enter after the Backoffice Dashboard loads:
    ```powershell
    .venv\Scripts\python.exe scripts\refresh_backoffice_session.py

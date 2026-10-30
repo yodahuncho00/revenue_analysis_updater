@@ -34,6 +34,12 @@ computer's login and OTP. After authentication, register the daily task with
 `powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1`.
 Use one scheduled runner per shared workbook to prevent concurrent updates.
 
+If Chromium installation reports `unable to verify the first certificate`, rerun
+the browser install from the project folder with `NODE_USE_SYSTEM_CA=1` so
+Playwright's Node runtime can use Windows' existing trusted certificates. This
+works when the network's root certificate is already trusted by Windows; it does
+not disable certificate verification.
+
 ### 1.1 Dry Run (Zero-Risk Validation)
 Uses the live Playwright extractor by default and executes the full pipeline
 (extraction, validation, precision write to working copy, Excel COM recalculation,

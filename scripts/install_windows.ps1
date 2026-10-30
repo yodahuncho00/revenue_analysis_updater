@@ -31,8 +31,15 @@ $VenvPython = Join-Path $ProjectDir ".venv\Scripts\python.exe"
 if ($LASTEXITCODE -ne 0) { throw "Could not upgrade pip in the project environment." }
 & $VenvPython -m pip install -r (Join-Path $ProjectDir "requirements.txt")
 if ($LASTEXITCODE -ne 0) { throw "Could not install the Python requirements." }
+# On managed Windows networks, the system/browser may trust a proxy CA that
+# Node's bundled CA list does not. Recent Node runtimes can use Windows' trusted
+# certificate store; keep TLS verification enabled and allow slow downloads.
+$env:NODE_USE_SYSTEM_CA = "1"
+$env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000"
 & $VenvPython -m playwright install chromium
-if ($LASTEXITCODE -ne 0) { throw "Could not install Playwright Chromium." }
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not install Playwright Chromium. Verify that Windows trusts the network certificate and retry with .venv\Scripts\python.exe -m playwright install chromium."
+}
 
 foreach ($Directory in @("data\logs", "data\raw", "data\exports", "data\reports", "data\backups")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $ProjectDir $Directory) | Out-Null
