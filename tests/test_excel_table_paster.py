@@ -353,8 +353,8 @@ def test_provider_paste_skips_header_when_normalizing_amounts(tmp_path):
     assert pasted["F7"].number_format == "#,##0.00;\\-#,##0.00;0"
     assert pasted["A6"].alignment.horizontal == "left"
     assert pasted["A7"].alignment.horizontal in (None, "general")
-    assert pasted.row_dimensions[6].height == pytest.approx(22.5)
-    assert pasted.row_dimensions[7].height == pytest.approx(45)
+    assert pasted.row_dimensions[6].height == pytest.approx(13)
+    assert pasted.row_dimensions[7].height == pytest.approx(13)
     updated.close()
 
     import os

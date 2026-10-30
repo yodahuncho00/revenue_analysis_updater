@@ -22,10 +22,12 @@ from notify.report import RunReportGenerator
 from notify.alerter import Alerter
 from extractors.fixture_extractor import FixtureExtractor
 from extractors.playwright_extractor import PlaywrightExtractor
+from scripts.update_revenue_dashboard import update_dashboard
 
 ALLOWED_STEPS = (
     "dashboard", "1",
     "merchants_balance", "2",
+    "providers_balance", "3",
     "settlements", "4",
     "topups", "5",
     "control", "6",
@@ -100,7 +102,7 @@ def run_pipeline(
     if step is not None and step not in ALLOWED_STEPS:
         raise ValueError(
             f"Unsupported ETL step {step!r}. Allowed steps: "
-            f"{', '.join(ALLOWED_STEPS)}. Provider Balance is not part of the ETL."
+            f"{', '.join(ALLOWED_STEPS)}."
         )
 
     start_time = time.time()
@@ -193,6 +195,15 @@ def run_pipeline(
             raw_captures["merchant_balance"] = raw_mb.rows
             balance_tables["BO_merchant_balance"] = (raw_mb, "A4")
             checks_passed.append("raw_merchant_balance_validated")
+
+        # STEP 3: Provider Balance
+        if step in (None, "providers_balance", "3"):
+            logger.info("--- STEP 3: Provider Balance Extraction ---")
+            raw_pb = extractor.extract_provider_balance()
+            RawDataValidator.validate_non_empty(raw_pb.rows, "Provider Balance")
+            raw_captures["provider_balance"] = raw_pb.rows
+            balance_tables["BO_provider_balance"] = (raw_pb, "A6")
+            checks_passed.append("raw_provider_balance_validated")
 
         # Read existing workbook state for append-only guards
         writer = ExcelWriter(working_copy_path)
@@ -428,6 +439,21 @@ def run_pipeline(
             checks_passed.append("atomic_commit_successful")
             logger.info("Production workbook updated successfully.")
 
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            dashboard_rows = update_dashboard(
+                workbook_path=os.path.abspath(prod_path),
+                template_path=os.path.join(
+                    project_root, "templates", "05. Revenue_dashboard.template.html"
+                ),
+                dashboard_path=os.path.join(
+                    project_root, "05. Revenue_dashboard.html"
+                ),
+            )
+            checks_passed.append("html_dashboard_refreshed")
+            logger.info(
+                f"HTML dashboard refreshed successfully ({dashboard_rows} data rows)."
+            )
+
         # Release lock
         copy_mgr.release_lock()
 
@@ -474,7 +500,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--step",
         choices=ALLOWED_STEPS,
-        help="Run one ETL step (Provider Balance is excluded)",
+        help="Run one ETL step",
     )
     parser.add_argument(
         "--extractor",

@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument(
         "--step",
         choices=ALLOWED_STEPS,
-        help="Run one ETL step (Provider Balance is excluded)",
+        help="Run one ETL step",
     )
     args = parser.parse_args()
 

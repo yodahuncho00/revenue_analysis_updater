@@ -172,14 +172,20 @@ class PlaywrightExtractor(BaseExtractor):
         return raw_path
 
     @contextmanager
-    def _authenticated_page(self, playwright: Any, url: str) -> Iterator[Any]:
+    def _authenticated_page(
+        self, playwright: Any, url: str, response_handler: Any = None
+    ) -> Iterator[Any]:
         context = self.launch_persistent_context(playwright)
         try:
             page = context.new_page()
+            if response_handler is not None:
+                page.on("response", response_handler)
             page.goto(
                 url,
-                wait_until="domcontentloaded",
-                timeout=self.bo_cfg.get("browser", {}).get("timeout_ms", 30000),
+                wait_until="commit",
+                timeout=self.bo_cfg.get("browser", {}).get(
+                    "navigation_timeout_ms", 60000
+                ),
             )
             self._assert_authenticated(page)
             yield page
@@ -358,6 +364,12 @@ class PlaywrightExtractor(BaseExtractor):
         if not response.ok:
             raise PlaywrightExtractionError(
                 f"Transaction request failed with HTTP {response.status}."
+            )
+        content_type = response.headers.get("content-type", "")
+        if "json" not in content_type.lower():
+            raise PlaywrightExtractionError(
+                "Transaction request returned an unexpected content type "
+                f"({content_type or 'missing'}), not JSON."
             )
         body = response.json()
         transactions = body.get("props", {}).get("settlements")
@@ -555,8 +567,10 @@ class PlaywrightExtractor(BaseExtractor):
             try:
                 page.goto(
                     url,
-                    wait_until="domcontentloaded",
-                    timeout=self.bo_cfg.get("browser", {}).get("timeout_ms", 30000),
+                    wait_until="commit",
+                    timeout=self.bo_cfg.get("browser", {}).get(
+                        "navigation_timeout_ms", 60000
+                    ),
                 )
                 reset_filters = page.get_by_role("button", name="Reset Filters", exact=True)
                 self._wait_for_backoffice_ready(page, reset_filters, "Dashboard")
@@ -680,8 +694,22 @@ class PlaywrightExtractor(BaseExtractor):
         if not url:
             raise PlaywrightExtractionError("Provider Balance route is not configured.")
 
+        api_responses = []
+
+        def capture_provider_response(response: Any) -> None:
+            if urlparse(response.url).path.rstrip("/").endswith(
+                "/api/v1/providers-balance/accounts"
+            ):
+                if not response.ok:
+                    raise PlaywrightExtractionError(
+                        f"Provider Balance data request failed with HTTP {response.status}."
+                    )
+                api_responses.append(response.json())
+
         with sync_playwright() as playwright:
-            with self._authenticated_page(playwright, url) as page:
+            with self._authenticated_page(
+                playwright, url, response_handler=capture_provider_response
+            ) as page:
                 self._wait_for_backoffice_ready(
                     page,
                     page.get_by_role("button", name="Reset Filters", exact=True),
@@ -689,6 +717,94 @@ class PlaywrightExtractor(BaseExtractor):
                 )
                 page.wait_for_selector("tbody tr.account-row")
                 self._scroll_balance_table_to_end(page)
+                if len(api_responses) != 1:
+                    raise PlaywrightExtractionError(
+                        "Provider Balance did not return exactly one complete account data response."
+                    )
+                accounts = api_responses[0].get("accounts")
+                if not isinstance(accounts, list) or not accounts:
+                    raise PlaywrightExtractionError(
+                        "Provider Balance data response has no account list."
+                    )
+                expanded_rows = page.evaluate(
+                    """accounts => {
+                        const table = Array.from(document.querySelectorAll("table"))
+                            .find(candidate => candidate.querySelector("tbody tr.account-row"));
+                        const body = table && Array.from(table.tBodies)
+                            .find(candidate => candidate.querySelector("tr.account-row"));
+                        if (!body) return {expanded: 0, rendered_ids: []};
+
+                        const used = new Set();
+                        const mappedIds = [];
+                        let expanded = 0;
+                        for (const row of Array.from(body.rows)) {
+                            if (!row.classList.contains("account-row")) continue;
+                            const cells = Array.from(row.cells);
+                            const accountName = row.querySelector(".account-name-link")
+                                ?.innerText.trim();
+                            const gateCell = row.querySelector("td.gate-name");
+                            if (!accountName || !gateCell) continue;
+
+                            const displayedIds = new Set(
+                                (gateCell.innerText.match(/\\d+/g) || [])
+                            );
+                            const account = accounts.find(candidate =>
+                                !used.has(candidate) && candidate.name === accountName &&
+                                (candidate.provider_ids || []).some(provider =>
+                                    displayedIds.has(String(provider.id))
+                                )
+                            );
+                            if (!account) continue;
+                            used.add(account);
+                            const providerIds = account.provider_ids || [];
+                            if (!providerIds.length) continue;
+
+                            const replacements = providerIds.map((provider, index) => {
+                                const copy = row.cloneNode(true);
+                                const copyCells = Array.from(copy.cells);
+                                const copiedGateCell = copy.querySelector("td.gate-name");
+                                copiedGateCell.textContent = `${provider.id} ${provider.country || ""}`.trim();
+                                // The Backoffice shows account-level balance and calculated
+                                // values once, while liabilities are specific to each provider ID.
+                                if (index > 0) {
+                                    copyCells[5].textContent = "";
+                                    copyCells[6].textContent = "";
+                                }
+                                const liability = provider.liabilities?.amount;
+                                copyCells[7].textContent = liability == null
+                                    ? ""
+                                    : Number(liability).toLocaleString("en-US", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                    });
+                                copy.style.height = "";
+                                for (const cell of copyCells) cell.style.height = "";
+                                return copy;
+                            });
+                            row.replaceWith(...replacements);
+                            providerIds.forEach(provider => mappedIds.push(String(provider.id)));
+                            expanded += providerIds.length;
+                        }
+
+                        const allIds = accounts.flatMap(account =>
+                            (account.provider_ids || []).map(provider => String(provider.id))
+                        );
+                        const renderedIds = Array.from(body.querySelectorAll("tr.account-row td.gate-name"))
+                            .flatMap(cell => (cell.innerText.match(/^\\s*(\\d+)/) || []).slice(1));
+                        return {expanded, provider_ids: mappedIds, rendered_ids: renderedIds,
+                            expected_ids: allIds,
+                            matched_accounts: used.size};
+                    }""",
+                    accounts,
+                )
+                if (
+                    expanded_rows["matched_accounts"] == 0
+                    or sorted(expanded_rows["rendered_ids"])
+                    != sorted(expanded_rows["expected_ids"])
+                ):
+                    raise PlaywrightExtractionError(
+                        "Provider Balance account IDs could not be mapped completely to the page."
+                    )
                 first_read = self._read_table_rows(page)
                 page.wait_for_timeout(300)
                 second_read = self._read_table_rows(page)
@@ -705,6 +821,8 @@ class PlaywrightExtractor(BaseExtractor):
                     "snapshot": True,
                     "row_count": capture.row_count,
                     "column_count": capture.column_count,
+                    "provider_id_count": len(expanded_rows["rendered_ids"]),
+                    "source": "Backoffice provider balance accounts API",
                 })
                 return capture
 
@@ -757,13 +875,25 @@ class PlaywrightExtractor(BaseExtractor):
                 from_input.fill(from_str)
                 to_input.fill(to_str)
 
-                timeout = self.bo_cfg.get("browser", {}).get("timeout_ms", 30000)
-                with page.expect_response(
-                    lambda response: urlparse(response.url).path == route_path
-                    and "json" in response.headers.get("content-type", ""),
-                    timeout=timeout,
-                ) as response_info:
-                    page.get_by_role("button", name="Apply", exact=True).click()
+                timeout = self.bo_cfg.get("browser", {}).get(
+                    "transaction_response_timeout_ms", 120000
+                )
+                try:
+                    with page.expect_response(
+                        lambda response: urlparse(response.url).path == route_path,
+                        timeout=timeout,
+                    ) as response_info:
+                        page.get_by_role("button", name="Apply", exact=True).click()
+                except Exception as exc:
+                    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+                    if not isinstance(exc, PlaywrightTimeoutError):
+                        raise
+                    raise PlaywrightExtractionError(
+                        f"{capture_name.title()} filter request returned no response "
+                        f"within {timeout} ms (page: {page.url}). Retry the run; "
+                        "if it repeats, refresh the Backoffice session and check connectivity."
+                    ) from exc
 
                 response = response_info.value
                 first_page = self._transaction_payload(response, 1)
@@ -790,14 +920,24 @@ class PlaywrightExtractor(BaseExtractor):
                 records = list(first_page["data"])
 
                 for page_number in range(2, last_page + 1):
-                    with page.expect_response(
-                        lambda next_response, page_number=page_number:
-                        urlparse(next_response.url).path == route_path
-                        and "json" in next_response.headers.get("content-type", "")
-                        and parse_qs(urlparse(next_response.url).query).get("page") == [str(page_number)],
-                        timeout=timeout,
-                    ) as next_response_info:
-                        page.get_by_role("button", name="Next page", exact=True).click()
+                    try:
+                        with page.expect_response(
+                            lambda next_response, page_number=page_number:
+                            urlparse(next_response.url).path == route_path
+                            and parse_qs(urlparse(next_response.url).query).get("page") == [str(page_number)],
+                            timeout=timeout,
+                        ) as next_response_info:
+                            page.get_by_role("button", name="Next page", exact=True).click()
+                    except Exception as exc:
+                        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+                        if not isinstance(exc, PlaywrightTimeoutError):
+                            raise
+                        raise PlaywrightExtractionError(
+                            f"{capture_name.title()} page {page_number} returned no response "
+                            f"within {timeout} ms. Retry the run; if it repeats, refresh "
+                            "the Backoffice session and check connectivity."
+                        ) from exc
                     transactions = self._transaction_payload(next_response_info.value, page_number)
                     next_body = next_response_info.value.json()
                     if next_body.get("props", {}).get("filters", {}) != expected_filters:

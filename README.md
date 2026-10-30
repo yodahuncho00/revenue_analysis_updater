@@ -1,6 +1,6 @@
 # Revenue Analysis Updater
 
-Windows ETL that updates the revenue analysis workbook from Backoffice and refreshes a standalone HTML dashboard. The daily job runs the ETL first; it rebuilds the dashboard only after a successful workbook update.
+Windows ETL that updates the revenue analysis workbook from Backoffice and refreshes a standalone HTML dashboard. `main.py` rebuilds the dashboard after a successful workbook commit.
 
 ## Install on Windows
 
@@ -29,7 +29,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
 
 ## Daily workflow
 
-The scheduled task calls `scripts\run_daily_etl.bat`. After a successful ETL commit, it runs `scripts\update_revenue_dashboard.py` to build `05. Revenue_dashboard.html` from the workbook. A failure creates `ATTENTION - Revenue update failed.txt` and displays a Windows popup with simple recovery steps. Failures are also logged in `data\logs\scheduler.log`. You can run the same sequence manually with:
+The scheduled task calls `scripts\run_daily_etl.bat`, which runs `main.py`. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard.html` from the workbook. If the workbook update or dashboard refresh fails, the batch job creates `ATTENTION - Revenue update failed.txt` and displays a popup with the error, run ID, and paths to the detailed log and report. Login or OTP failures include the session refresh command. You can run the same sequence manually with:
 
 ```powershell
 scripts\run_daily_etl.bat

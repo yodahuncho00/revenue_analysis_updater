@@ -5,15 +5,12 @@ from datetime import datetime, date
 from main import (
     ALLOWED_STEPS,
     _earliest_missing_transaction_detail_date,
-    run_pipeline,
 )
 
 
-@pytest.mark.parametrize("removed_step", ["3", "providers_balance"])
-def test_provider_balance_step_is_rejected(removed_step):
-    assert removed_step not in ALLOWED_STEPS
-    with pytest.raises(ValueError, match="Provider Balance is not part of the ETL"):
-        run_pipeline(step=removed_step)
+@pytest.mark.parametrize("provider_step", ["3", "providers_balance"])
+def test_provider_balance_step_is_available(provider_step):
+    assert provider_step in ALLOWED_STEPS
 
 
 def test_earliest_missing_transaction_detail_date_ignores_complete_and_future_rows():

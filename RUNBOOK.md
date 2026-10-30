@@ -69,11 +69,14 @@ removed from cleared tail rows to avoid stale data and horizontal lines.
 Summary `SUMIFS` ranges begin at the first detail row and resize to include the
 latest captured table rows.
 
-Provider Balance is excluded from the ETL: it is not extracted, pasted, or
-otherwise modified. Its worksheet remains in the workbook unchanged.
+Provider Balance is read from the Backoffice account-balance response and
+expanded to one worksheet row per provider ID. Account-level balance and
+calculated balance values appear once per account group; provider liabilities
+are written against their individual provider IDs.
 
 ### 1.3 Normal Production Daily Run
-Runs the complete ETL pipeline and atomically commits updates to `05. Revenue_analysis.xlsx`:
+Runs the complete ETL pipeline, atomically commits updates to `05. Revenue_analysis.xlsx`,
+then refreshes `05. Revenue_dashboard.html` from the committed workbook:
 ```bash
 python main.py
 ```
@@ -89,6 +92,7 @@ Runs only an isolated step against the working copy:
 ```bash
 python main.py --step dashboard           # Step 1: Dashboard -> BO_extract -> Data
 python main.py --step merchants_balance   # Step 2: Merchants Balance
+python main.py --step providers_balance   # Step 3: Provider Balance
 python main.py --step settlements         # Step 4: Settlements (append-only)
 python main.py --step topups              # Step 5: Top-ups (append-only)
 python main.py --step control             # Step 6: Update Control sheet as-of date
@@ -119,7 +123,7 @@ a complete five-file set.
 The pipeline is inherently self-healing after missed runs (e.g. holidays, downtime, network failures):
 1. **Dashboard & Data Sheets (Step 1):** Always completely rebuilds the current reporting month from day 1 to $D - 1$. If a day or week was missed, the entire month is refreshed consistently with zero partial state.
 2. **Settlements & Top-ups (Steps 4–5):** Inspects the highest existing timestamp $L$ in the sheet and queries from $[L + 1\text{ day}]$ through $D$, skipping weekends. All missed working days are automatically retrieved and appended in strictly ascending order by ID.
-3. **Merchant Balance (Step 2):** Replaces its snapshot with the latest live status. Provider Balance is excluded and remains unchanged.
+3. **Merchant and Provider Balances (Steps 2–3):** Replace their snapshots with the latest live status.
 
 ---
 
@@ -144,7 +148,19 @@ Every single ETL run automatically creates a timestamped backup in `data/backups
 
 ## 4. Alert & Failure Diagnostic Catalog
 
-Treat all alerts as hard stop conditions. When an alert occurs, the production workbook is left 100% untouched, and the working copy is retained for debugging.
+Treat all alerts as hard stop conditions. Failures before the atomic workbook commit leave the production workbook unchanged and retain the working copy for debugging. If the report includes `atomic_commit_successful`, the workbook was committed and a later step (such as the dashboard refresh) failed.
+
+The scheduled task's popup shows the run ID, the likely error, and direct paths to
+that run's log and report. If it says login or OTP is required, refresh the
+Backoffice session and retry. If no report exists, Python may have crashed or been
+stopped before its error handler; inspect the run log and Task Scheduler history.
+Send the run log and report to the person supporting the setup. Never send the
+workbook, raw exports, browser profile, or `data/storage_state.json`.
+
+If no popup appeared and you are unsure whether the scheduled run started, open
+Task Scheduler → Task Scheduler Library → `RevenueAnalysisDailyETL` and check
+**Last Run Time** and **Last Run Result**. A missed run should start when the
+computer becomes available, if Windows permits it.
 
 | Alert / Error | Meaning | Resolution Steps |
 |---|---|---|

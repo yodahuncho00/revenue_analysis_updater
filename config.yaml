@@ -29,6 +29,8 @@ backoffice:
   browser:
     headless: true
     timeout_ms: 30000
+    navigation_timeout_ms: 60000
+    transaction_response_timeout_ms: 120000
     transaction_export_timeout_ms: 120000
     viewport:
       width: 1920

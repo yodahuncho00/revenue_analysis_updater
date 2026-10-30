@@ -72,6 +72,20 @@ class ExcelWriter:
                 worksheet.cell(formula_start_row - 1, column).fill = copy(
                     worksheet.cell(formula_start_row, column).fill
                 )
+        if sheet_name == "BO_provider_balance":
+            from openpyxl.formula.translate import Translator
+
+            for column in range(helper_start, helper_end + 1):
+                template_cell = worksheet.cell(formula_start_row, column)
+                template_formula = template_cell.value
+                if not isinstance(template_formula, str) or not template_formula.startswith("="):
+                    continue
+                origin = template_cell.coordinate
+                for row in range(formula_start_row, end_row + 1):
+                    cell = worksheet.cell(row, column)
+                    cell.value = Translator(
+                        template_formula, origin=origin
+                    ).translate_formula(cell.coordinate)
         for row in range(max(5, formula_start_row - 1), end_row + 1):
             for column in range(helper_start, helper_end + 1):
                 worksheet.cell(row, column).number_format = helper_number_format

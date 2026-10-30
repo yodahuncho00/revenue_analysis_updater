@@ -249,35 +249,6 @@ class ExcelTablePaster:
             )
 
     @classmethod
-    def _apply_captured_row_heights(
-        cls, worksheet, top_row: int, capture: BalanceTableCapture
-    ) -> None:
-        runs = []
-        for offset, row in enumerate(capture.rows):
-            height = row.get("height")
-            if not isinstance(height, (int, float)) or height <= 0:
-                continue
-            row_number = top_row + offset
-            height_points = round(height * 0.75, 2)
-            if (
-                runs
-                and runs[-1][1] + 1 == row_number
-                and runs[-1][2] == height_points
-            ):
-                runs[-1][1] = row_number
-            else:
-                runs.append([row_number, row_number, height_points])
-
-        for first_row, last_row, height_points in runs:
-            cls._retry_excel_call(
-                lambda: setattr(
-                    worksheet.Rows(f"{first_row}:{last_row}"),
-                    "RowHeight",
-                    height_points,
-                )
-            )
-
-    @classmethod
     def _write_captured_cells(
         cls, worksheet, top_row: int, first_column: int,
         capture: BalanceTableCapture
@@ -457,12 +428,40 @@ class ExcelTablePaster:
                     )
                 )
                 cls._retry_excel_call(lambda: pasted_range.UnMerge())
-                cls._write_captured_cells(
-                    worksheet, top_row, left_column, capture
+                # Pasting HTML and unmerging cells can invalidate a worksheet
+                # proxy even though Excel still has the sheet open. Reacquire it
+                # after those operations, and retry once with a fresh proxy if
+                # Excel reports VBA's "Object required" error.
+                worksheet = cls._retry_excel_call(
+                    lambda: workbook.Worksheets(sheet_name)
                 )
+                try:
+                    cls._write_captured_cells(
+                        worksheet, top_row, left_column, capture
+                    )
+                except pywintypes.com_error as exc:
+                    error_code = exc.args[0] if exc.args else None
+                    if error_code != -2146827864:
+                        raise
+                    worksheet = cls._retry_excel_call(
+                        lambda: workbook.Worksheets(sheet_name)
+                    )
+                    try:
+                        cls._write_captured_cells(
+                            worksheet, top_row, left_column, capture
+                        )
+                    except pywintypes.com_error as retry_exc:
+                        raise RuntimeError(
+                            f"Excel could not write captured values to "
+                            f"{sheet_name}!{start_cell} after reacquiring the worksheet."
+                        ) from retry_exc
                 if sheet_name == "BO_provider_balance":
-                    cls._apply_captured_row_heights(
-                        worksheet, top_row, capture
+                    cls._retry_excel_call(
+                        lambda: setattr(
+                            worksheet.Rows(f"{top_row}:{last_existing_row}"),
+                            "RowHeight",
+                            13,
+                        )
                     )
                 if pasted_last_row < last_existing_row:
                     stale_tail = cls._retry_excel_call(

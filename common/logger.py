@@ -22,6 +22,8 @@ def setup_logger(run_id: Optional[str] = None, log_dir: str = "data/logs", secre
 
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"{run_id}.log")
+    with open(os.path.join(log_dir, "latest_run.txt"), "w", encoding="utf-8") as run_file:
+        run_file.write(f"{run_id}\n")
 
     logger = logging.getLogger(run_id)
     logger.setLevel(logging.DEBUG)

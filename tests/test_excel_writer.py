@@ -154,6 +154,20 @@ def test_balance_summary_formula_range_tracks_pasted_data(tmp_path):
     provider["K5"] = "=1"
     merchant["I630"] = "=1"
     provider["K110"] = "=1"
+    provider_formulas = [
+        "=IF(B6=0,0,1)",
+        "=IF(K6=0,0,F6)",
+        "=IF(L6=0,0,G6)",
+        "=IF(L6=0,0,H6)",
+        "=IFERROR(_xlfn.XLOOKUP($A6,Merchant_master!$H:$H,Merchant_master!$G:$G),0)",
+        "=IF(O6=0,P5,O6)",
+        "=IFERROR(_xlfn.XLOOKUP($A6,Provider_master!$A:$A,Provider_master!$A:$A),0)",
+        "=IF($Q6=0,$R5,Q6)",
+        "=C6",
+        '=CONCATENATE(P6,"_",R6,"_",S6)',
+    ]
+    for column, formula in enumerate(provider_formulas, 11):
+        provider.cell(6, column).value = formula
     workbook.save(workbook_path)
     workbook.close()
 
@@ -193,6 +207,12 @@ def test_balance_summary_formula_range_tracks_pasted_data(tmp_path):
         assert provider_end == 101
         assert writer.wb["BO_provider_balance"]["F2"].value == (
             "=SUMIFS(F$6:F$101,$K$6:$K$101,1)"
+        )
+        assert writer.wb["BO_provider_balance"]["K101"].value == (
+            "=IF(B101=0,0,1)"
+        )
+        assert writer.wb["BO_provider_balance"]["T101"].value == (
+            '=CONCATENATE(P101,"_",R101,"_",S101)'
         )
         assert writer.wb["BO_merchant_balance"]["I5"].number_format == helper_format
         assert writer.wb["BO_merchant_balance"]["U625"].number_format == helper_format

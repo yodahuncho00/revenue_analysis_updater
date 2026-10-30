@@ -53,6 +53,7 @@ class RunReportGenerator:
 | `BO_extract` | {row_counts.get('bo_extract', 0)} |
 | `Data` | {row_counts.get('data', 0)} |
 | `BO_merchant_balance` | {row_counts.get('bo_merchant_balance', 0)} |
+| `BO_provider_balance` | {row_counts.get('bo_provider_balance', 0)} |
 | `BO_settlements` | {row_counts.get('bo_settlements', 0)} |
 | `BO_topups` | {row_counts.get('bo_topups', 0)} |
 
