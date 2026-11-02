@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 from pathlib import Path
 
 import yaml
@@ -14,7 +15,7 @@ from extractors.playwright_extractor import (
 )
 
 
-def main() -> None:
+def main(preflight: bool = False) -> None:
     config_path = PROJECT_ROOT / "config.yaml"
     with config_path.open("r", encoding="utf-8") as config_file:
         config = yaml.safe_load(config_file)
@@ -38,6 +39,33 @@ def main() -> None:
 
     with sync_playwright() as playwright:
         extractor = PlaywrightExtractor(config)
+
+        if preflight:
+            context = extractor.launch_persistent_context(playwright, headless=True)
+            needs_login = False
+            try:
+                page = context.new_page()
+                page.goto(
+                    dashboard_url,
+                    wait_until="domcontentloaded",
+                    timeout=backoffice.get("browser", {}).get("timeout_ms", 30000),
+                )
+                try:
+                    extractor._assert_authenticated(page)
+                except PlaywrightExtractionError:
+                    needs_login = True
+                if not needs_login:
+                    ready = page.get_by_role("button", name="Reset Filters", exact=True)
+                    extractor._wait_for_backoffice_ready(page, ready, "Dashboard")
+                    context.storage_state(path=state_path)
+                    print("Backoffice session is valid; starting the daily ETL.")
+                    return
+            finally:
+                context.close()
+
+            if needs_login:
+                print("Backoffice login is required before today's ETL can start.")
+
         context = extractor.launch_persistent_context(playwright, headless=False)
         try:
             page = context.new_page()
@@ -55,15 +83,16 @@ def main() -> None:
                     wait_until="domcontentloaded",
                     timeout=backoffice.get("browser", {}).get("timeout_ms", 30000),
                 )
-                input(
-                    "This Playwright profile needs authentication. Sign in manually "
-                    "(and complete OTP if requested). When the Dashboard is loaded, "
-                    "press Enter here..."
+                print(
+                    "Today's ETL is paused. Sign in and complete OTP in the visible "
+                    "browser; if needed, open the Backoffice Dashboard. The ETL will "
+                    "continue once its controls are ready."
                 )
-                page.goto(
-                    dashboard_url,
-                    wait_until="domcontentloaded",
-                    timeout=backoffice.get("browser", {}).get("timeout_ms", 30000),
+                ready.wait_for(
+                    state="visible",
+                    timeout=backoffice.get("browser", {}).get(
+                        "login_timeout_ms", 600000
+                    ),
                 )
             else:
                 print("Existing Playwright authentication found; reusing the profile.")
@@ -76,4 +105,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Check or refresh the Backoffice session.")
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Check authentication before the daily ETL; prompt for login if expired.",
+    )
+    main(preflight=parser.parse_args().preflight)

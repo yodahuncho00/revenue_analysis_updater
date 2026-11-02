@@ -23,20 +23,20 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    $env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000"
    .venv\Scripts\python.exe -m playwright install chromium
    ```
-6. Authenticate this computer interactively. Run the command below, sign in and complete OTP in the browser, then press Enter after the Backoffice Dashboard loads:
+6. Authenticate this computer interactively. Run the command below and complete login and OTP in the browser; the script continues when the Backoffice Dashboard is ready:
    ```powershell
    .venv\Scripts\python.exe scripts\refresh_backoffice_session.py
    ```
    Session state is saved per Windows user. Do not copy `data\storage_state.json` or the browser profile from another computer.
-7. Register the daily task at 07:00 local time:
+7. Register the daily task at 10:58 local time:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
    ```
-   The task runs as the current interactive Windows user. That user must be logged in, and Excel must be available. The task can wake the computer from sleep if Windows power settings and hardware allow wake timers. Backoffice may request OTP again when its session expires.
+   The task runs as the current interactive Windows user. That user must be logged in, and Excel must be available. The task can wake the computer from sleep if Windows power settings and hardware allow wake timers. Backoffice may request OTP again when its session expires; the daily run then waits for login before starting the ETL.
 
 ## Daily workflow
 
-The scheduled task calls `scripts\run_daily_etl.bat`, which runs `main.py`. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard_Gateway.html` from the workbook. If the workbook update or dashboard refresh fails, the batch job creates `ATTENTION - Revenue update failed.txt` and displays a popup with the error, run ID, and paths to the detailed log and report. Login or OTP failures include the session refresh command. You can run the same sequence manually with:
+The scheduled task calls `scripts\run_daily_etl.bat`. Before starting the ETL, it checks the saved Backoffice session. If login or OTP is required, it opens the browser and waits for the Dashboard to be ready; the ETL does not start until then. If login cannot be completed, it shows an alert and makes no workbook changes. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard_Gateway.html` from the workbook. Other ETL or dashboard failures also create `ATTENTION - Revenue update failed.txt` with the error, run ID, and diagnostic paths. You can run the same sequence manually with:
 
 ```powershell
 scripts\run_daily_etl.bat

@@ -1,4 +1,4 @@
-# Registers the daily Revenue Analysis job at 07:00 local time, every day.
+# Registers the daily Revenue Analysis job at 10:58 local time, every day.
 $ErrorActionPreference = "Stop"
 
 $TaskName = "RevenueAnalysisDailyETL"

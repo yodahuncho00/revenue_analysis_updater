@@ -59,9 +59,9 @@ Backoffice asks for login or OTP, refresh the profile interactively:
 ```powershell
 python scripts\refresh_backoffice_session.py
 ```
-Complete login and OTP in the visible browser. Press Enter in the terminal only
-after the Dashboard has loaded. The session state is saved only after the script
-verifies the Dashboard is ready. Run the ETL and refresh utility under the same
+Complete login and OTP in the visible browser, then open the Backoffice Dashboard
+if login does not redirect there. The script continues once it verifies the
+Dashboard is ready. Run the ETL and refresh utility under the same
 Windows account, and do not run them concurrently because Chromium locks its profile.
 Treat both the profile and `data/storage_state.json` as passwords: they contain
 authentication data and must not be shared or committed.
@@ -174,6 +174,7 @@ computer becomes available, if Windows permits it.
 | `StructureValidationError: Workbook is locked or currently open` | Excel has an exclusive lock on the file. | Close Excel or save your work and re-run. |
 | `PermissionError` opening `*.working.xlsx` during balance paste | Windows or OneDrive temporarily denied access to the working copy. The paste step retries briefly before failing with recovery guidance. | Close the working copy in Excel, wait for OneDrive to finish syncing, and rerun. If it persists, check OneDrive sync status and the file's Security permissions. |
 | `Backoffice authentication is required` / `login or verification form` | The saved session expired or OTP/login is required. | Run `python scripts\refresh_backoffice_session.py`, complete login and OTP, then retry. Production remains untouched on this failure. |
+| `PRE-FLIGHT LOGIN FAILED` | The daily batch could not verify or refresh the Backoffice session, so the ETL was not started. | Complete login/OTP in the opened browser and rerun `scripts\run_daily_etl.bat`. |
 | `Dashboard did not become ready` | Backoffice did not show its expected controls and no login form was detected. | Check network/VPN/Backoffice availability; inspect the run log and retry after service is restored. |
 | `CopyManagerError: Another ETL run is already active` / `A previous ETL process may still be running` | Another update owns the per-workbook OS mutex, or an older lock marker belongs to a live process. A hard stop releases the mutex automatically; the next run removes the abandoned marker. | If the message repeats, check Task Manager for `main.py` and let any active ETL finish before retrying. Do not delete the lock while a run is active. |
 | `RawValidationError: Hierarchy sum mismatch` | Sum of child rows does not foot to parent row in Backoffice table. | Check `data/raw/<run_id>/dashboard.json` for corrupted data in source Backoffice. |
@@ -201,11 +202,15 @@ Before going fully live, run the autonomous pipeline in shadow mode:
 3. Once satisfied with complete cell-by-cell equality over 3–5 days, activate the automated Windows Task Scheduler job.
 
 ### Task Scheduler Notes
-Install or update the daily job at 07:00 local time (all seven days) from a
+Install or update the daily job at 10:58 local time (all seven days) from a
 PowerShell prompt in the project directory:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
 ```
+Before the ETL starts, the task checks the saved Backoffice session. If login or
+OTP is required, it opens the visible browser and waits for the Dashboard to be
+ready. The task does not start the ETL until authentication succeeds; if the
+login step fails or is cancelled, it alerts and leaves the workbook untouched.
 The task runs the ETL and, only after a successful workbook update, regenerates
 `05. Revenue_dashboard_Gateway.html` from the updated workbook. It is configured to wake
 the computer from sleep when Windows and the hardware permit wake timers, and to
