@@ -64,6 +64,8 @@ h1{font-size:20px;margin:0}
 select,input[type=number],input[type=text]{font:inherit;font-size:13px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px 8px;max-width:210px}
 input[type=number]{width:110px}
 select:focus,input:focus,.btn:focus{outline:2px solid var(--accent);outline-offset:1px}
+.f.na{opacity:.38}.f.na select,.f.na .seg{pointer-events:none}
+.na-note{margin:8px 24px 0;font-size:12px;color:var(--text-2);background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:6px 10px}
 .chk{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text-2);padding-bottom:6px}
 .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)}
 .seg button{border:0;background:transparent;color:var(--text-2);padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
@@ -152,6 +154,7 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
   <a data-p="cohorts"><span class="num">6</span>Cohorts</a>
   <a data-p="recon"><span class="num">7</span>Merchant &amp; Provider balances</a>
   <a data-p="calc"><span class="num">8</span>Fee calculator</a>
+  <a data-p="notes"><span class="num">9</span>Data &amp; notes</a>
   <div class="side-foot" id="sideFoot"></div>
 </nav>
 <main>
@@ -169,6 +172,7 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
 <div class="filters" id="filters">
   <div class="f"><label for="fPeriod">Period</label><select id="fPeriod"></select></div>
   <div class="f"><label for="fCmp">Compare with</label><select id="fCmp"></select></div>
+  <div class="f"><label>Currency</label><div class="seg" id="fCur"><button data-v="USD" class="on" title="Report in US dollars">USD</button><button data-v="ZMW" title="Report in Zambian kwacha (cross rate via USD)">ZMW</button></div></div>
   <div class="f"><label>Basis</label><div class="seg" id="fBasis"><button data-v="day" class="on" title="Divide by days in period so partial months compare fairly">Per day</button><button data-v="total">Totals</button></div></div>
   <div class="f"><label for="fCountry">Country</label><select id="fCountry"></select></div>
   <div class="f"><label for="fMtype">Merchant type</label><select id="fMtype"></select></div>
@@ -182,6 +186,7 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
   <button class="btn sm" id="fReset">Reset filters</button>
 </div>
 <div class="chips" id="chips"></div>
+<div class="na-note hidden" id="naNote"></div>
 
 <!-- 1 OVERVIEW -->
 <section class="page on" id="p-overview">
@@ -283,20 +288,20 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
   <div class="callout" id="rInfo"></div>
   <div class="kpis" id="rKpis"></div>
   <div class="grid g2">
-    <div class="card"><h3>Merchant balances by country</h3><div class="note">USD, share of total merchant balances</div><div class="chart short"><canvas id="cRMc"></canvas></div></div>
-    <div class="card"><h3>Provider balances by country</h3><div class="note">USD, share of total provider balances</div><div class="chart short"><canvas id="cRPc"></canvas></div></div>
-    <div class="card"><h3>Top 10 merchant balances</h3><div class="note">USD, with share of total · remaining accounts grouped</div><div class="chart"><canvas id="cRMt"></canvas></div></div>
-    <div class="card"><h3>Top 10 provider balances</h3><div class="note">USD, with share of total · remaining accounts grouped</div><div class="chart"><canvas id="cRPt"></canvas></div></div>
+    <div class="card"><h3>Merchant balances by country</h3><div class="note"><span class="cur">USD</span>, share of total merchant balances</div><div class="chart short"><canvas id="cRMc"></canvas></div></div>
+    <div class="card"><h3>Provider balances by country</h3><div class="note"><span class="cur">USD</span>, share of total provider balances</div><div class="chart short"><canvas id="cRPc"></canvas></div></div>
+    <div class="card"><h3>Top 10 merchant balances</h3><div class="note"><span class="cur">USD</span>, with share of total · remaining accounts grouped</div><div class="chart"><canvas id="cRMt"></canvas></div></div>
+    <div class="card"><h3>Top 10 provider balances</h3><div class="note"><span class="cur">USD</span>, with share of total · remaining accounts grouped</div><div class="chart"><canvas id="cRPt"></canvas></div></div>
     <div class="card"><h3>Merchant balance build</h3><div class="note" id="rMwNote"></div><div class="chart"><canvas id="cRMw"></canvas></div></div>
     <div class="card"><h3>Provider balance build</h3><div class="note" id="rPwNote"></div><div class="chart"><canvas id="cRPw"></canvas></div></div>
   </div>
-  <div class="card" style="margin-top:14px"><div class="card-h"><div><h3>Merchant balances (USD)</h3><div class="note">Merchant delta = deposits − deposit fee − withdrawals − withdrawal fee − settlement + topup. Variance = delta − balance.</div></div><button class="btn sm" data-csv="tblRM">Download CSV</button></div><div class="tbl-wrap" id="tblRM"></div></div>
-  <div class="card" style="margin-top:14px"><div class="card-h"><div><h3>Provider balances (USD)</h3><div class="note">Provider delta = deposits − deposit cost − withdrawals − withdrawal cost − settlement + topup. Variance = balance − delta.</div></div><button class="btn sm" data-csv="tblRP">Download CSV</button></div><div class="tbl-wrap" id="tblRP"></div></div>
+  <div class="card" style="margin-top:14px"><div class="card-h"><div><h3>Merchant balances (<span class="cur">USD</span>)</h3><div class="note">Merchant delta = deposits − deposit fee − withdrawals − withdrawal fee − settlement + topup. Variance = delta − balance.</div></div><button class="btn sm" data-csv="tblRM">Download CSV</button></div><div class="tbl-wrap" id="tblRM"></div></div>
+  <div class="card" style="margin-top:14px"><div class="card-h"><div><h3>Provider balances (<span class="cur">USD</span>)</h3><div class="note">Provider delta = deposits − deposit cost − withdrawals − withdrawal cost − settlement + topup. Variance = balance − delta.</div></div><button class="btn sm" data-csv="tblRP">Download CSV</button></div><div class="tbl-wrap" id="tblRP"></div></div>
 </section>
 
 <!-- 8 FEE CALCULATOR -->
 <section class="page" id="p-calc">
-  <div class="page-h"><h2>Merchant fee calculator</h2><div class="tools"><button class="btn sm" id="kReset">Reset to example offer</button><button class="btn sm" id="kCsv">Download offer CSV</button><button class="btn sm" id="kCopy">Copy offer summary</button></div></div>
+  <div class="page-h"><h2>Merchant fee calculator</h2><div class="tools"><div class="seg" id="kCur" title="Reporting currency"><button data-v="USD" class="on">USD</button><button data-v="ZMW">ZMW</button></div><button class="btn sm" id="kReset">Reset to example offer</button><button class="btn sm" id="kCsv">Download offer CSV</button><button class="btn sm" id="kCopy">Copy offer summary</button></div></div>
   <div class="callout">Price a new or existing merchant. The global filters above do not apply here. Direct MNO channels cannot carry high-risk (betting) traffic – those lines are blocked. All rates are % of volume.</div>
 
   <div class="step-h"><span class="n">1</span><h3>Describe the client</h3></div>
@@ -318,7 +323,7 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
   <div class="card"><div class="card-h"><div><div class="note" id="kChNote"></div></div><button class="btn sm" data-csv="tblKC">CSV</button></div><div class="tbl-wrap" id="tblKC"></div></div>
 
   <div class="step-h"><span class="n">4</span><h3>Build the offer</h3></div>
-  <div class="card offer"><div class="card-h"><div class="note">One line per country, service and channel. Leave "Your price" blank to use the offer-card price. Volume is expected monthly USD.</div><button class="btn sm primary" id="kAdd">+ Add line</button></div><div class="tbl-wrap" id="tblOffer" style="max-height:none"></div></div>
+  <div class="card offer"><div class="card-h"><div class="note">One line per country, service and channel. Leave "Your price" blank to use the offer-card price. Volume is expected monthly <span class="cur">USD</span>.</div><button class="btn sm primary" id="kAdd">+ Add line</button></div><div class="tbl-wrap" id="tblOffer" style="max-height:none"></div></div>
 
   <div class="step-h"><span class="n">5</span><h3>Offer economics</h3></div>
   <div class="card">
@@ -326,12 +331,35 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
     <div class="res-grid" id="kRes"></div>
   </div>
   <div class="grid g2" style="margin-top:14px">
-    <div class="card"><h3>Monthly net revenue by line</h3><div class="note">Merchant fees less provider cost, USD per month</div><div class="chart"><canvas id="cKLines"></canvas></div></div>
-    <div class="card"><div class="card-h"><div><h3>Sensitivity – monthly net revenue (USD)</h3><div class="note">Rows: price change on every line (percentage points). Columns: volume vs plan.</div></div></div><div class="tbl-wrap" id="tblSens"></div></div>
+    <div class="card"><h3>Monthly net revenue by line</h3><div class="note">Merchant fees less provider cost, <span class="cur">USD</span> per month</div><div class="chart"><canvas id="cKLines"></canvas></div></div>
+    <div class="card"><div class="card-h"><div><h3>Sensitivity – monthly net revenue (<span class="cur">USD</span>)</h3><div class="note">Rows: price change on every line (percentage points). Columns: volume vs plan.</div></div></div><div class="tbl-wrap" id="tblSens"></div></div>
   </div>
 
   <div class="step-h"><span class="n">6</span><h3>Offer card (standard prices)</h3></div>
   <div class="card offer"><div class="card-h"><div class="note">Standard merchant prices by country, service and wallet. "Any" applies to every wallet unless a specific row exists. Edits here update the calculator immediately (they are not saved back to Excel).</div><button class="btn sm" id="kAddCard">+ Add price</button></div><div class="tbl-wrap" id="tblCard" style="max-height:none"></div></div>
+</section>
+
+<!-- 9 DATA & NOTES -->
+<section class="page" id="p-notes">
+  <div class="page-h"><h2>Data &amp; notes</h2><span class="sub" id="nSub"></span></div>
+  <div class="grid g2">
+    <div class="card"><h3>Source and coverage</h3><div class="note" id="nSrcNote"></div><ul class="insights" id="nSrc"></ul></div>
+    <div class="card"><h3>Currency conversion</h3><div class="note">How every amount in this dashboard is translated</div><ul class="insights" id="nMethod"></ul></div>
+  </div>
+  <div class="card" style="margin-top:14px"><div class="card-h"><div><h3>FX rates used for conversion</h3><div class="note" id="nFxNote"></div></div>
+    <div class="tools"><div class="f"><label for="nQuote">Quote</label><select id="nQuote"><option value="USD">Local currency per 1 USD</option><option value="ZMW">Local currency per 1 ZMW (cross rate)</option></select></div>
+    <div class="f"><label for="nType">Rate</label><select id="nType"><option value="avg">Period average (P&amp;L)</option><option value="close">Month-end closing (balances)</option></select></div>
+    <button class="btn sm" data-csv="tblFx">Download CSV</button></div></div>
+    <div class="tbl-wrap" id="tblFx"></div></div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>ZMW per USD</h3><div class="note">Average and closing rate by period · used to translate USD into ZMW</div><div class="legend" id="lgFx"></div><div class="chart short"><canvas id="cFx"></canvas></div></div>
+    <div class="card"><h3>Worked example</h3><div class="note">Live conversion for the current month</div><div id="nExample"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><div class="card-h"><div><h3>Data by period</h3><div class="note" id="nCovNote"></div></div><button class="btn sm" data-csv="tblCov">Download CSV</button></div><div class="tbl-wrap" id="tblCov"></div></div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>Definitions</h3><ul class="insights" id="nDefs"></ul></div>
+    <div class="card"><h3>Data notes and known issues</h3><div class="note">From the completeness check on the Excel file at this refresh</div><ul class="insights" id="nIssues"></ul></div>
+  </div>
 </section>
 
 <footer id="foot"></footer>
@@ -355,7 +383,7 @@ footer{padding:0 24px 30px;color:var(--text-3);font-size:12px}
 </script>
 <script>
 "use strict";
-const D = {"facts":[],"control":[{"rpt_month":"2000-01-31","as_of":"2000-01-01","cy":2000,"cm":1,"pmy":1999,"pmm":12,"py":1999,"days_in":31,"days_el":0,"days_pm":31,"months_el":0,"zoyk_share":0,"include_test":0}],"merchant_master":[],"provider_master":[],"channel_master":[],"merchant_recon":[],"provider_recon":[],"offer_card":[]};
+const D = {"facts":[],"control":[{"rpt_month":"2000-01-31","as_of":"2000-01-01","cy":2000,"cm":1,"pmy":1999,"pmm":12,"py":1999,"days_in":31,"days_el":0,"days_pm":31,"months_el":0,"zoyk_share":0,"include_test":0,"file_ccy":"USD","tol_match_lcy":0,"tol_minor_usd":0}],"merchant_master":[],"provider_master":[],"channel_master":[],"merchant_recon":[],"provider_recon":[],"offer_card":[],"fx":[],"meta":[{"fx_ccys":[],"source":"05. Revenue_analysis_Gateway.xlsx","exported":""}]};
 const C0 = D.control[0];
 const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const $ = s => document.querySelector(s);
@@ -370,9 +398,25 @@ D.facts.forEach(f => {
   const b = {type:f.type, year:f.year, month:f.month, country:f.country, ccy:f.ccy, merchant:f.merchant, provider:f.provider,
     channel:f.channel, method:f.method, merchant_type:f.merchant_type, test:f.test, vintage:f.vintage || 'Unassigned',
     channel_type:f.channel_type, risk:f.risk || 'Unassigned'};
-  if (f.deposits || f.dep_fees || f.dep_cost) LEGS.push({...b, dir:DIR_C2B, vol:f.deposits, fees:f.dep_fees, cost:f.dep_cost});
-  if (f.withdrawals || f.wd_fees || f.wd_cost) LEGS.push({...b, dir:DIR_B2C, vol:f.withdrawals, fees:f.wd_fees, cost:f.wd_cost});
+  if (f.deposits || f.dep_fees || f.dep_cost) LEGS.push({...b, dir:DIR_C2B, vol:f.deposits, fees:f.dep_fees, cost:f.dep_cost, vU:f.deposits, fU:f.dep_fees, cU:f.dep_cost});
+  if (f.withdrawals || f.wd_fees || f.wd_cost) LEGS.push({...b, dir:DIR_B2C, vol:f.withdrawals, fees:f.wd_fees, cost:f.wd_cost, vU:f.withdrawals, fU:f.wd_fees, cU:f.wd_cost});
 });
+
+/* ---------- reporting currency (USD / ZMW, cross rate via USD) ---------- */
+const FXT = Object.fromEntries(D.fx.map(r => [r.key, r]));
+let CUR = 'USD', ASOF = null;
+const RKEYS = ['dep','dfee','wd','wfee','settle','topup','calc','cumonly','delta','bal','bal2','bal3','var'];
+D.merchant_recon.concat(D.provider_recon).forEach(r => RKEYS.forEach(k => r['_' + k] = r[k]));
+LEGS.forEach(l => l.key = l.year + '_' + l.month);
+function setCurrency(c) {
+  CUR = c;
+  for (const l of LEGS) { const k = CUR === 'ZMW' ? ((FXT[l.key] || {avg:{}}).avg.ZMW || 0) : 1; l.vol = l.vU * k; l.fees = l.fU * k; l.cost = l.cU * k; }
+  const kc = CUR === 'ZMW' ? ((FXT[C0.cy + '_' + C0.cm] || {}).close || {}).ZMW || 0 : 1;
+  D.merchant_recon.concat(D.provider_recon).forEach(r => RKEYS.forEach(k => r[k] = r['_' + k] * kc));
+  document.querySelectorAll('.cur').forEach(e => e.textContent = CUR);
+  if (ASOF) $('#asof').textContent = ASOF();
+  document.querySelectorAll('#fCur button, #kCur button').forEach(b => b.classList.toggle('on', b.dataset.v === CUR));
+}
 
 /* ---------- periods ---------- */
 const CY = C0.cy, CM = C0.cm, DEL = C0.days_el;
@@ -407,7 +451,7 @@ function baseLegs(skip) {
   return LEGS.filter(l => (S.test || !l.test) && FDIMS.every(k => k === skip || S[k] === 'All' || l[k] === S[k]));
 }
 const scaleOf = p => S.basis === 'day' && p ? 1/p.days : 1;
-const basisLbl = () => S.basis === 'day' ? 'USD per day' : 'USD';
+const basisLbl = () => S.basis === 'day' ? CUR + ' per day' : CUR;
 
 /* ---------- aggregation ---------- */
 function agg(legs) {
@@ -447,8 +491,9 @@ const nf2 = new Intl.NumberFormat('en-US', {minimumFractionDigits:2, maximumFrac
 function usd(v, short) {
   if (v == null || isNaN(v)) return '–';
   const a = Math.abs(v), s = v < 0 ? '−' : '';
-  if (short) { if (a >= 1e6) return s+'$'+(a/1e6).toFixed(2)+'M'; if (a >= 1e4) return s+'$'+(a/1e3).toFixed(1)+'k'; if (a >= 100) return s+'$'+nf0.format(a); return s+'$'+a.toFixed(2); }
-  return s + '$' + (a < 100 && a > 0 ? nf2.format(a) : nf0.format(a));
+  const $s = CUR === 'ZMW' ? 'K' : '$';
+  if (short) { if (a >= 1e6) return s+$s+(a/1e6).toFixed(2)+'M'; if (a >= 1e4) return s+$s+(a/1e3).toFixed(1)+'k'; if (a >= 100) return s+$s+nf0.format(a); return s+$s+a.toFixed(2); }
+  return s + $s + (a < 100 && a > 0 ? nf2.format(a) : nf0.format(a));
 }
 const pct = (v, d = 2) => v == null || isNaN(v) || !isFinite(v) ? '–' : (v*100).toFixed(d) + '%';
 const pp = v => v == null || isNaN(v) ? '–' : (v >= 0 ? '+' : '−') + Math.abs(v*100).toFixed(2) + 'pp';
@@ -556,7 +601,7 @@ function buildFilters() {
   $('#fTest').checked = S.test;
   document.querySelectorAll('#fBasis button').forEach(b => b.classList.toggle('on', b.dataset.v === S.basis));
   const chips = []; const p = curP(), c = cmpP();
-  chips.push(`Period: <b>${p.label}</b> (${p.days} days)`); chips.push(`Compare: <b>${c ? c.label : 'none'}</b>`); chips.push(`Basis: <b>${S.basis === 'day' ? 'per day' : 'reported totals'}</b>`);
+  chips.push(`Period: <b>${p.label}</b> (${p.days} days)`); chips.push(`Compare: <b>${c ? c.label : 'none'}</b>`); chips.push(`Basis: <b>${S.basis === 'day' ? 'per day' : 'reported totals'}</b>`); chips.push(`Currency: <b>${CUR}</b>${CUR === 'ZMW' ? ' (K, cross rate via USD)' : ''}`);
   for (const k of FDIMS) if (S[k] !== 'All') chips.push(`${DIMS[k] || k}: <b>${esc(S[k])}</b>`);
   if (S.test) chips.push('<b>Including test accounts</b>');
   $('#chips').innerHTML = chips.map(x => `<span class="chip">${x}</span>`).join('');
@@ -567,6 +612,7 @@ function bindFilters() {
   for (const [id, k] of Object.entries(FMAP)) document.getElementById(id).onchange = e => { S[k] = e.target.value; refresh(); };
   $('#fTest').onchange = e => { S.test = e.target.checked; refresh(); };
   document.querySelectorAll('#fBasis button').forEach(b => b.onclick = () => { S.basis = b.dataset.v; refresh(); });
+  document.querySelectorAll('#fCur button, #kCur button').forEach(b => b.onclick = () => { setCurrency(b.dataset.v); refresh(); });
   $('#fReset').onclick = () => { Object.assign(S, DEF); $('#tGran').value = granFor(curP()); refresh(); };
 }
 
@@ -946,23 +992,24 @@ function wfSteps(id, steps, fmtV) {
 function rRecon() {
   const st = $('#rStatus').value;
   const f = r => (S.country === 'All' || r.country === S.country) && (st === 'All' || r.status === st);
-  const M = D.merchant_recon.filter(r => f(r) && (S.merchant === 'All' || r.merchant === S.merchant) && (S.test || !TEST_M.has(r.merchant)));
+  const MMAP = Object.fromEntries(D.merchant_master.map(m => [m.merchant, m]));
+  const M = D.merchant_recon.filter(r => f(r) && (S.merchant === 'All' || r.merchant === S.merchant) && (S.test || !TEST_M.has(r.merchant)) && (S.merchant_type === 'All' || (MMAP[r.merchant] || {}).merchant_type === S.merchant_type) && (S.risk === 'All' || (MMAP[r.merchant] || {}).risk === S.risk));
   const P = D.provider_recon.filter(r => f(r) && (S.provider === 'All' || r.provider === S.provider));
   const mb = sum(M, r => r.bal), pb = sum(P, r => r.bal), md = sum(M, r => r.delta), pd = sum(P, r => r.delta);
   const exc = rs => rs.filter(r => r.status === 'Mismatch' || r.status === 'Review').length;
-  $('#rInfo').innerHTML = `Balances as at <b>${new Date(C0.as_of + 'T00:00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'})}</b>, cumulative 2023 to date, from the USD sections of Merchant_Balance and Provider_Balance. The country, merchant, provider and test-account filters apply; period filters do not.`;
+  $('#rInfo').innerHTML = `Balances as at <b>${new Date(C0.as_of + 'T00:00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'})}</b>, cumulative 2023 to date, from the reporting-currency sections of Merchant_Balance and Provider_Balance. Country, merchant, provider and test accounts apply to both tables; merchant type and traffic risk to merchant balances; period filters do not apply.`;
   const tile = (l, v, d) => `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${d || ''}</div></div>`;
   $('#rKpis').innerHTML = [
     tile('Merchant balances', usd(mb, true), `${M.length} accounts`),
     tile('Provider balances', usd(pb, true), `${P.length} accounts`),
-    tile('Provider − merchant balances', `<span class="${pb - mb >= 0 ? 'up' : 'dn'}">${usd(pb - mb, true)}</span>`, pb ? `cover ${pct(pb / (mb || 1), 0)} of merchant balances` : ''),
+    (S.merchant !== 'All' || S.merchant_type !== 'All' || S.risk !== 'All' || S.provider !== 'All') ? tile('Provider − merchant balances', '<span class="muted">n/a</span>', 'not comparable while a merchant or provider filter is on') : tile('Provider − merchant balances', `<span class="${pb - mb >= 0 ? 'up' : 'dn'}">${usd(pb - mb, true)}</span>`, pb ? `cover ${pct(pb / (mb || 1), 0)} of merchant balances` : ''),
     tile('Largest merchant balance', M.length ? usd(Math.max(...M.map(r => r.bal)), true) : '–', M.length ? (() => { const t = M.slice().sort((a, b) => b.bal - a.bal)[0]; return `${esc(t.merchant)} · ${pct(t.bal / (mb || 1), 1)} of total`; })() : ''),
     tile('Merchant delta (cumulative)', usd(md, true), `variance vs balance ${usd(md - mb, true)}`),
     tile('Provider delta (cumulative)', usd(pd, true), `variance vs balance ${usd(pb - pd, true)}`),
     tile('Merchant exceptions', `<span class="${exc(M) ? 'dn' : 'up'}">${exc(M)}</span>`, 'Mismatch or Review'),
     tile('Provider exceptions', `<span class="${exc(P) ? 'dn' : 'up'}">${exc(P)}</span>`, 'Mismatch or Review')].join('');
   const dist = (rs, key, tot, n) => { const g = new Map(); rs.forEach(r => g.set(r[key], (g.get(r[key]) || 0) + r.bal)); let a = [...g.entries()].sort((x, y) => y[1] - x[1]); if (n && a.length > n) { const o = sum(a.slice(n), x => x[1]); a = a.slice(0, n); a.push([`All other (${g.size - n})`, o]); } return a.filter(([k, v]) => Math.abs(v) >= 0.5).map(([k, v]) => [k, v, tot ? v / tot : null]); };
-  const hb = (id, d, colr) => mk(id, {type:'bar', data:{labels:d.map(x => `${x[0]} · ${x[2] == null ? '' : (x[2]*100).toFixed(1) + '%'}`), datasets:[barDs('Balance USD', d.map(x => x[1]), d.map(x => x[1] < 0 ? css('--crit') : /^All other/.test(x[0]) ? css('--other') : colr))]},
+  const hb = (id, d, colr) => mk(id, {type:'bar', data:{labels:d.map(x => `${x[0]} · ${x[2] == null ? '' : (x[2]*100).toFixed(1) + '%'}`), datasets:[barDs('Balance ' + CUR, d.map(x => x[1]), d.map(x => x[1] < 0 ? css('--crit') : /^All other/.test(x[0]) ? css('--other') : colr))]},
     options:baseOpts({indexAxis:'y', interaction:{mode:'nearest', axis:'y', intersect:false}, scales:{x:{grid:{color:css('--grid')}, border:{display:false}, ...yUsd()}, y:{grid:{display:false}, ticks:{font:{size:11}}}}, plugins:{...baseOpts().plugins, tooltip:{...baseOpts().plugins.tooltip, callbacks:{label:x => ` ${usd(d[x.dataIndex][1])} · ${pct(d[x.dataIndex][2], 1)} of total`}}}})});
   hb('cRMc', dist(M, 'country', mb), css('--s1')); hb('cRPc', dist(P, 'country', pb), css('--s1'));
   const mkey = M.map(r => ({...r, nm:r.merchant + (S.country === 'All' ? ' · ' + r.country.replace('Republic of ', '') : '')})), pkey = P.map(r => ({...r, nm:r.provider + (S.country === 'All' ? ' · ' + r.country.replace('Republic of ', '') : '')}));
@@ -972,8 +1019,8 @@ function rRecon() {
     const other = s('delta') - s('calc'); if (Math.abs(other) > 0.5) steps.push({l:'Other movements', v:other});
     steps.push({l:isM ? 'Merchant delta' : 'Provider delta', v:s('delta'), total:true}); steps.push({l:'Balance', v:s('bal'), total:true}); return steps; };
   wfSteps('cRMw', build(M, true), short); wfSteps('cRPw', build(P, false), short);
-  $('#rMwNote').innerHTML = `USD · starts from net flow (deposits ${usd(sum(M, r => r.dep), true)} − withdrawals ${usd(sum(M, r => r.wd), true)}) · delta ${usd(md, true)} vs balance ${usd(mb, true)} → variance ${usd(md - mb, true)}`;
-  $('#rPwNote').innerHTML = `USD · starts from net flow (deposits ${usd(sum(P, r => r.dep), true)} − withdrawals ${usd(sum(P, r => r.wd), true)}) · delta ${usd(pd, true)} vs balance ${usd(pb, true)} → variance ${usd(pb - pd, true)}`;
+  $('#rMwNote').innerHTML = `${CUR} · starts from net flow (deposits ${usd(sum(M, r => r.dep), true)} − withdrawals ${usd(sum(M, r => r.wd), true)}) · delta ${usd(md, true)} vs balance ${usd(mb, true)} → variance ${usd(md - mb, true)}`;
+  $('#rPwNote').innerHTML = `${CUR} · starts from net flow (deposits ${usd(sum(P, r => r.dep), true)} − withdrawals ${usd(sum(P, r => r.wd), true)}) · delta ${usd(pd, true)} vs balance ${usd(pb, true)} → variance ${usd(pb - pd, true)}`;
   const mrows = M.map(r => ({...r, share:mb ? r.bal / mb : null})), prow = P.map(r => ({...r, share:pb ? r.bal / pb : null}));
   const tot = (rs, nk, sh) => { const t = {[nk]:'Total', country:'', currency:'', status:''}; ['dep','dfee','wd','wfee','settle','topup','delta','bal','bal2','bal3','var'].forEach(k => t[k] = sum(rs, r => r[k])); t.share = 1; return t; };
   const C = (nk, isM) => [{k:nk, l:isM ? 'Merchant' : 'Provider', t:'txt'}, {k:'country', l:'Country', t:'txt'}, {k:'currency', l:'CCY', t:'txt'},
@@ -1036,7 +1083,9 @@ function initCalc() {
   $('#kCopy').onclick = () => { const t = offerSummary(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { $('#kCopy').textContent = 'Copied'; setTimeout(() => $('#kCopy').textContent = 'Copy offer summary', 1500); }).catch(() => prompt('Copy the summary:', t)); };
 }
 function setExample() {
-  $('#kMerchant').value = '';
+  const m = D.merchant_master.find(x => !x.test);
+  $('#kMerchant').value = m ? m.merchant : '';
+  if (m) $('#kType').value = m.merchant_type;
   $('#kRisk').value = 'High risk'; $('#kCountry').value = 'Zambia';
   LINES = EX_LINES();
   LINES.forEach(l => l.channel = defaultChannel(l.country, l.service, 'High risk', l.country === 'Zambia' ? 'Airtel' : null));
@@ -1081,13 +1130,13 @@ function rCalc() {
   const brows = benches.map(([n, ls]) => { const a = agg(ls); return {name:n, vol:a.vol, frD:mv(a, 'frD'), frW:mv(a, 'frW'), crD:mv(a, 'crD'), crW:mv(a, 'crW'), fr:mv(a, 'fr'), cr:mv(a, 'cr'), tr:mv(a, 'tr'), rev:a.rev, n:a.m.size}; }).filter(r => r.vol || !/client/.test(r.name));
   table('tblKB', [{k:'name', l:'Benchmark', t:'txt'}, {k:'vol', l:'Volume', t:'usd'}, {k:'frD', l:'Fee rate C2B', t:'pct'}, {k:'frW', l:'Fee rate B2C', t:'pct'}, {k:'crD', l:'Cost rate C2B', t:'pct'}, {k:'crW', l:'Cost rate B2C', t:'pct'}, {k:'tr', l:'Net take rate', t:'pct'}, {k:'rev', l:'Partner Revenue', t:'usd'}, {k:'n', l:'Merchants', t:'int'}], brows, {nosort:true});
   const hp = $('#kHist').selectedOptions[0].textContent;
-  $('#kBenchNote').textContent = `${country} · ${hp} · total USD (not per day)`;
+  $('#kBenchNote').textContent = `${country} · ${hp} · total ${CUR} (not per day)`;
   // client history by channel
   const cl = histLegs().filter(l => l.merchant === merchant);
   const cg = groupBy(cl, 'channel');
   const hrows = [...cg.entries()].map(([ch, ls]) => { const a = agg(ls), x = ls[0]; return {name:ch, country:x.country, provider:x.provider, wallet:x.method, ctype:x.channel_type, dep:a.dep, frD:mv(a, 'frD'), wd:a.wd, frW:mv(a, 'frW'), cr:mv(a, 'cr'), tr:mv(a, 'tr'), rev:a.rev}; });
   table('tblKH', [{k:'name', l:'Payment channel', t:'txt'}, {k:'country', l:'Country', t:'txt'}, {k:'provider', l:'Provider', t:'txt'}, {k:'wallet', l:'Wallet', t:'txt'}, {k:'ctype', l:'Type', t:'txt'}, {k:'dep', l:'C2B volume', t:'usd'}, {k:'frD', l:'C2B fee rate', t:'pct'}, {k:'wd', l:'B2C volume', t:'usd'}, {k:'frW', l:'B2C fee rate', t:'pct'}, {k:'cr', l:'Cost rate', t:'pct'}, {k:'tr', l:'Net take rate', t:'pct'}, {k:'rev', l:'Partner Revenue', t:'usd'}], hrows, {sort:'dep'});
-  $('#kHistNote').textContent = merchant ? (hrows.length ? `${merchant} · ${hp} · total USD` : `No history for ${merchant} in ${hp}.`) : 'New merchant – no history.';
+  $('#kHistNote').textContent = merchant ? (hrows.length ? `${merchant} · ${hp} · total ${CUR}` : `No history for ${merchant} in ${hp}.`) : 'New merchant – no history.';
   // channels in country
   const chs = D.channel_master.filter(c => c.country === country);
   const comp = groupBy(histLegs().filter(l => l.country === country), 'channel');
@@ -1109,7 +1158,7 @@ function rOffer() {
   const countries = uniq(D.channel_master.map(c => c.country)).sort();
   const sel = (i, f, vals, cur) => `<select data-i="${i}" data-f="${f}">${vals.map(v => `<option value="${esc(v[0])}"${v[0] === cur ? ' selected' : ''}>${esc(v[1])}</option>`).join('')}</select>`;
   const stCell = s => s === 'OK' ? '<span class="status"><span class="dot" style="background:var(--good)"></span>✓ OK</span>' : `<span class="status"><span class="dot" style="background:${/BLOCKED|Loss/.test(s) ? 'var(--crit)' : 'var(--warn)'}"></span>${/BLOCKED|Loss/.test(s) ? '✕' : '!'} ${esc(s)}</span>`;
-  let h = '<table><thead><tr>' + ['Country', 'Service', 'Payment channel', 'Monthly volume (USD)', 'Wallet', 'Type', 'HR allowed', 'Offer-card price', 'Your price %', 'Price used', 'Provider cost', 'Net take rate', 'Merchant fees / mo', 'Provider cost / mo', 'Net revenue / mo', 'Zoyk share', 'Unipesa share', 'Status', 'Company hist. fee', 'Price vs hist.', 'Price for target', ''].map(x => `<th class="nosort${x === 'Country' || x === 'Service' || x === 'Payment channel' || x === 'Status' ? ' txt' : ''}">${x}</th>`).join('') + '</tr></thead><tbody>';
+  let h = '<table><thead><tr>' + ['Country', 'Service', 'Payment channel', 'Monthly volume (' + CUR + ')', 'Wallet', 'Type', 'HR allowed', 'Offer-card price', 'Your price %', 'Price used', 'Provider cost', 'Net take rate', 'Merchant fees / mo', 'Provider cost / mo', 'Net revenue / mo', 'Zoyk share', 'Unipesa share', 'Status', 'Company hist. fee', 'Price vs hist.', 'Price for target', ''].map(x => `<th class="nosort${x === 'Country' || x === 'Service' || x === 'Payment channel' || x === 'Status' ? ' txt' : ''}">${x}</th>`).join('') + '</tr></thead><tbody>';
   rows.forEach((r, i) => {
     const chOpts = D.channel_master.filter(c => c.country === r.country).map(c => [c.channel, `${c.channel} · ${c.method}${usable(c, risk) ? '' : ' (direct – not for HR)'}`]);
     h += `<tr><td class="txt">${sel(i, 'country', countries.map(c => [c, c]), r.country)}</td><td class="txt">${sel(i, 'service', SVC.map(s => [s, s]), r.service)}</td><td class="txt">${sel(i, 'channel', [['', '– choose –'], ...chOpts], r.channel)}</td>
@@ -1130,7 +1179,7 @@ function rOffer() {
   });
   $('#tblOffer').querySelectorAll('[data-del]').forEach(b => b.onclick = () => { LINES.splice(+b.dataset.del, 1); rOffer(); });
   // hidden csv table
-  TBL.tblOfferX = {cols:[{k:'country', l:'Country'}, {k:'service', l:'Service'}, {k:'channel', l:'Payment channel'}, {k:'wallet', l:'Wallet'}, {k:'vol', l:'Monthly volume USD'}, {k:'used', l:'Price'}, {k:'cost', l:'Provider cost rate'}, {k:'take', l:'Net take rate'}, {k:'mFees', l:'Merchant fees per month'}, {k:'mCost', l:'Provider cost per month'}, {k:'net', l:'Net revenue per month'}, {k:'zoyk', l:'Zoyk share'}, {k:'uni', l:'Unipesa share'}, {k:'status', l:'Status'}], rows, o:{}};
+  TBL.tblOfferX = {cols:[{k:'country', l:'Country'}, {k:'service', l:'Service'}, {k:'channel', l:'Payment channel'}, {k:'wallet', l:'Wallet'}, {k:'vol', l:'Monthly volume ' + CUR}, {k:'used', l:'Price'}, {k:'cost', l:'Provider cost rate'}, {k:'take', l:'Net take rate'}, {k:'mFees', l:'Merchant fees per month'}, {k:'mCost', l:'Provider cost per month'}, {k:'net', l:'Net revenue per month'}, {k:'zoyk', l:'Zoyk share'}, {k:'uni', l:'Unipesa share'}, {k:'status', l:'Status'}], rows, o:{}};
   // results
   const blocked = rows.filter(r => !/^OK|Loss/.test(r.status)).length;
   const tgt = (+$('#kTarget').value || 0) / 100;
@@ -1165,15 +1214,81 @@ function offerSummary() {
 }
 
 /* ---------- navigation & refresh ---------- */
-const RENDER = {overview:rOverview, trends:rTrends, merchants:rMerchants, providers:rProviders, breakdown:rBreakdown, cohorts:rCohorts, recon:rRecon, calc:rCalc};
+/* =========================================================
+   9. DATA & NOTES
+   ========================================================= */
+const FX_CCYS = (D.meta[0] || {}).fx_ccys || ['USD','ZMW'];
+const fxLabel = r => r.month === 0 ? `FY${r.year}` : `${MN[r.month - 1]}-${String(r.year).slice(2)}${r.year === CY && r.month === CM ? ' MTD' : ''}`;
+const ISSUES = ['Review the workbook Flags sheet for refresh-time data issues.'];
+function rNotes() {
+  const fmtD = s => { const d = new Date(s + 'T00:00:00'); return `${d.getDate()} ${MN[d.getMonth()]} ${d.getFullYear()}`; };
+  const legs = LEGS.filter(l => S.test || !l.test);
+  $('#nSub').textContent = `Reporting currency ${CUR} · data as of ${fmtD(C0.as_of)}`;
+  $('#nSrcNote').textContent = `${(D.meta[0] || {}).source || 'Excel'} · exported ${(D.meta[0] || {}).exported || ''}`;
+  const per = uniq(D.facts.map(f => f.year + '_' + f.month));
+  $('#nSrc').innerHTML = [
+    `Source file <b>05. Revenue_analysis_Gateway.xlsx</b>: Data (Backoffice period exports, ${D.facts.length} rows), Control, FX, Merchant_master, Provider_master, Channel_master, Merchant_Balance, Provider_Balance, Offer_card.`,
+    `Periods: FY2023–FY${CY - 1} as full years, ${CY} by month to ${MN[CM - 1]} (month to date, ${DEL} of ${dim(CY, CM)} days).`,
+    `Headline = <b>Partner Revenue</b> = merchant fees − provider costs; split ${Math.round(ZS()*100)}% Zoyk / ${Math.round((1-ZS())*100)}% Unipesa.`,
+    `${D.merchant_master.filter(m => !m.test).length} merchants, ${D.provider_master.length} providers and ${D.channel_master.length} payment channels in the masters; ${per.length} periods loaded.`,
+    `Balances are cumulative 2023 to date, at the ${MN[CM - 1]}-${String(CY).slice(2)} closing rate.`].map(x => `<li>${x}</li>`).join('');
+  $('#nMethod').innerHTML = [
+    `Every Backoffice amount is in local currency (LCY). It is first translated to <b>USD</b> at the rate for its period: the <b>monthly average</b> for months, the <b>full-year average</b> for FY rows.`,
+    `<b>ZMW reporting</b> uses the cross rate through USD: amount in ZMW = amount in LCY × (ZMW per USD) ÷ (LCY per USD), with both rates from the same period. ZMW amounts therefore stay exactly as booked.`,
+    `<b>Balances</b> (Merchant &amp; Provider balances page) use the <b>month-end closing</b> rates of the reporting month.`,
+    `Rates such as fee rate, cost rate and take rate are ratios and do not change with the currency.`,
+    `The Excel file uses the same method: Control!B24 switches it between USD and ZMW (FX tab, columns AA onward hold the cross rates).`].map(x => `<li>${x}</li>`).join('');
+  // FX table
+  const q = $('#nQuote').value, t = $('#nType').value;
+  const rows = D.fx.map(r => { const o = {name:fxLabel(r)}; FX_CCYS.forEach(c => { const v = r[t][c], base = q === 'USD' ? 1 : r[t].ZMW; o[c] = v != null && base ? v / base : null; }); return o; });
+  const rate = v => v == null ? '–' : (Math.abs(v) >= 100 ? nf2.format(v) : v.toFixed(4));
+  table('tblFx', [{k:'name', l:'Period', t:'txt'}, ...FX_CCYS.map(c => ({k:c, l:c, t:'num', render:rate}))], rows, {nosort:true});
+  $('#nFxNote').innerHTML = `${t === 'avg' ? 'Period average – used for every revenue, volume, fee and cost figure' : 'Month-end closing – the ' + MN[CM - 1] + '-' + String(CY).slice(2) + ' row is used for balances'} · ${q === 'USD' ? 'local currency per 1 USD' : 'local currency per 1 ZMW = (LCY per USD) ÷ (ZMW per USD)'} · source: FX tab (Backoffice FX_rates; ZWG and ETB fixed).`;
+  // chart
+  const fr = D.fx.filter(r => r.avg.ZMW);
+  legendHTML('lgFx', [['Average', css('--s1')], ['Closing', css('--s2')]]);
+  mk('cFx', {type:'line', data:{labels:fr.map(fxLabel), datasets:[lineDs('Average', fr.map(r => r.avg.ZMW), css('--s1')), lineDs('Closing', fr.map(r => r.close.ZMW), css('--s2'))]},
+    options:baseOpts({scales:{...baseOpts().scales, y:{...baseOpts().scales.y, ticks:{callback:v => v.toFixed(1)}}}, plugins:{...baseOpts().plugins, tooltip:{...baseOpts().plugins.tooltip, callbacks:{label:x => ` ${x.dataset.label}: ${x.raw.toFixed(4)} ZMW per USD`}}}})});
+  // worked example
+  const cr = FXT[`${CY}_${CM}`] || D.fx[D.fx.length - 1] || {key:'',year:CY,month:CM,avg:{USD:1,ZMW:0},close:{USD:1,ZMW:0}}; const a = cr.avg, ex = 1000000;
+  const exRows = FX_CCYS.filter(c => a[c]).map(c => `<tr><td class="txt">${nf0.format(ex)} ${c}</td><td>${nf2.format(ex / a[c])}</td><td>${nf2.format(ex / a[c] * a.ZMW)}</td><td>${(a[c] / a.ZMW).toFixed(4)}</td></tr>`).join('');
+  $('#nExample').innerHTML = `<div class="tbl-wrap"><table><thead><tr><th class="txt nosort">Amount (${fxLabel(cr)})</th><th class="nosort">In USD</th><th class="nosort">In ZMW</th><th class="nosort">LCY per ZMW</th></tr></thead><tbody>${exRows}</tbody></table></div>
+    <div class="note" style="margin-top:8px">ZMW = LCY ÷ (LCY per USD) × ${a.ZMW.toFixed(4)} ZMW per USD (${fxLabel(cr)} average).</div>`;
+  // coverage
+  const cov = D.fx.filter(r => D.facts.some(f => f.year === r.year && f.month === r.month)).map(r => {
+    const fs = D.facts.filter(f => f.year === r.year && f.month === r.month), ls = legs.filter(l => l.year === r.year && l.month === r.month), ag = agg(ls);
+    return {name:fxLabel(r), rows:fs.length, ccy:uniq(fs.map(f => f.ccy)).join(', '), m:ag.m.size, vol:ag.vol, rev:ag.rev, tr:mv(ag, 'tr'), zr:r.avg.ZMW}; });
+  table('tblCov', [{k:'name', l:'Period', t:'txt'}, {k:'rows', l:'Data rows', t:'int'}, {k:'ccy', l:'Currencies', t:'txt'}, {k:'m', l:'Active merchants', t:'int'}, {k:'vol', l:`Turnover (${CUR})`, t:'usd'}, {k:'rev', l:`Partner Revenue (${CUR})`, t:'usd'}, {k:'tr', l:'Net take rate', t:'pct'}, {k:'zr', l:'ZMW per USD (avg)', t:'num', render:v => v ? v.toFixed(4) : '–'}], cov, {nosort:true});
+  $('#nCovNote').textContent = `Reported totals in ${CUR} (not per day), test accounts ${S.test ? 'included' : 'excluded'}. Ties to Monthly_summary in the Excel.`;
+  $('#nDefs').innerHTML = [
+    '<b>Turnover</b> = deposits (C2B, collections) + withdrawals (B2C, disbursements).',
+    '<b>Merchant fees</b> = fees charged to merchants; <b>provider costs</b> = fees paid to payment providers.',
+    '<b>Partner Revenue</b> = merchant fees − provider costs. <b>Net take rate</b> = Partner Revenue ÷ turnover.',
+    '<b>Fee rate</b> = merchant fees ÷ turnover; <b>cost rate</b> = provider costs ÷ turnover (also shown separately for C2B and B2C).',
+    '<b>Per day</b> basis divides totals by calendar days in the period so the partial month compares fairly; <b>run-rate</b> = per day × days in month.',
+    '<b>Vintage</b> = year (FY2023–FY2025) or month (2026) a merchant first traded. <b>Active merchant</b> = turnover in the period.',
+    '<b>Merchant delta</b> = deposits − deposit fee − withdrawals − withdrawal fee − settlement + topup; <b>provider delta</b> uses provider costs.'].map(x => `<li>${x}</li>`).join('');
+  $('#nIssues').innerHTML = ISSUES.map(x => `<li>${x}</li>`).join('');
+}
+
+const RENDER = {overview:rOverview, trends:rTrends, merchants:rMerchants, providers:rProviders, breakdown:rBreakdown, cohorts:rCohorts, recon:rRecon, calc:rCalc, notes:rNotes};
+const NA = {cohorts:['fPeriod','fCmp'], recon:['fPeriod','fCmp','fBasis','fCtype','fMethod','fDir'], notes:['fPeriod','fCmp','fBasis','fCountry','fMtype','fMerchant','fProvider','fCtype','fMethod','fDir','fRisk']};
+const NA_NOTE = {cohorts:'Greyed-out filters are not used here: cohort tables always show every period (FY2023 to date). Basis and all other filters apply.',
+  notes:'Only the currency switch and the test-account tick apply on this page.',
+  recon:'Greyed-out filters are not used here: balances are cumulative to the as-of date. Country, merchant, provider and test accounts apply to both tables; merchant type and traffic risk apply to merchant balances.'};
+function applyNA() {
+  const na = NA[PAGE] || [];
+  ['fPeriod','fCmp','fBasis','fCountry','fMtype','fMerchant','fProvider','fCtype','fMethod','fDir','fRisk'].forEach(id => { const el = document.getElementById(id).closest('.f'); const off = na.includes(id); el.classList.toggle('na', off); el.title = off ? 'Not used on this page' : ''; });
+  $('#naNote').textContent = NA_NOTE[PAGE] || ''; $('#naNote').classList.toggle('hidden', !NA_NOTE[PAGE] || PAGE === 'calc');
+}
 function show(pg) {
   PAGE = pg;
   document.querySelectorAll('nav.side a').forEach(a => a.classList.toggle('on', a.dataset.p === pg));
   document.querySelectorAll('section.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + pg));
   $('#filters').classList.toggle('hidden', pg === 'calc'); $('#chips').classList.toggle('hidden', pg === 'calc');
-  RENDER[pg]();
+  applyNA(); RENDER[pg]();
 }
-function refresh() { buildFilters(); RENDER[PAGE](); }
+function refresh() { buildFilters(); applyNA(); RENDER[PAGE](); }
 document.querySelectorAll('nav.side a').forEach(a => a.onclick = () => { show(a.dataset.p); window.scrollTo({top:0}); });
 $('#themeBtn').onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark ? 'light' : 'dark'; RENDER[PAGE](); };
 
@@ -1194,11 +1309,12 @@ function init() {
   $('#wBy').onchange = rMerchants; $('#mdSel').onchange = rMDetail; $('#mdBy').onchange = rMDetail;
   ['bDim','bDim2','bMetric'].forEach(id => document.getElementById(id).onchange = rBreakdown);
   ['cGroup','cMetric'].forEach(id => document.getElementById(id).onchange = rCohorts);
-  $('#rStatus').onchange = rRecon;
+  $('#rStatus').onchange = rRecon; ['nQuote','nType'].forEach(id => document.getElementById(id).onchange = rNotes);
   const fmtD = s => { const d = new Date(s + 'T00:00:00'); return `${d.getDate()} ${MN[d.getMonth()]} ${d.getFullYear()}`; };
-  $('#asof').textContent = `Data as of ${fmtD(C0.as_of)} · ${MN[CM-1]} ${CY} is month to date (${DEL} of ${dim(CY, CM)} days) · headline = Partner Revenue (merchant fees − provider costs) · USD at monthly average FX`;
-  $('#sideFoot').innerHTML = `As of ${fmtD(C0.as_of)}<br>Source: 05. Revenue_analysis.xlsx`;
-  $('#foot').innerHTML = `Built from <b>05. Revenue_analysis.xlsx</b> (Data, Control, Merchant_master, Provider_master, Channel_master, Merchant_Balance, Provider_Balance, Offer_card). Test accounts excluded unless ticked. Zoyk / Unipesa split ${Math.round(ZS()*100)}% / ${Math.round((1-ZS())*100)}%. Per-day basis divides totals by calendar days in the period (current month: ${DEL} days).`;
+  ASOF = () => `Data as of ${fmtD(C0.as_of)} · ${MN[CM-1]} ${CY} is month to date (${DEL} of ${dim(CY, CM)} days) · headline = Partner Revenue (merchant fees − provider costs) · amounts in ${CUR}${CUR === 'ZMW' ? ' (cross rate via USD)' : ''} at period-average FX, balances at closing`;
+  $('#asof').textContent = ASOF();
+  $('#sideFoot').innerHTML = `As of ${fmtD(C0.as_of)}<br>Source: 05. Revenue_analysis_Gateway.xlsx`;
+  $('#foot').innerHTML = `Built from <b>05. Revenue_analysis_Gateway.xlsx</b> (Data, Control, Merchant_master, Provider_master, Channel_master, Merchant_Balance, Provider_Balance, Offer_card). Test accounts excluded unless ticked. Zoyk / Unipesa split ${Math.round(ZS()*100)}% / ${Math.round((1-ZS())*100)}%. Per-day basis divides totals by calendar days in the period (current month: ${DEL} days).`;
   bindFilters(); initCalc(); buildFilters(); show('overview');
 }
 init();

@@ -20,6 +20,8 @@ class ExcelTablePaster:
 
     COM_RETRY_ATTEMPTS = 40
     COM_RETRY_DELAY_SECONDS = 0.25
+    FILE_ACCESS_RETRY_ATTEMPTS = 8
+    FILE_ACCESS_RETRY_DELAY_SECONDS = 1
     RPC_E_CALL_REJECTED = -2147418111
     COM_DISCONNECTED_ERRORS = {-2147417848, -2147023174}
 
@@ -326,9 +328,21 @@ class ExcelTablePaster:
         if not tables:
             return
 
-        source_workbook = openpyxl.load_workbook(
-            workbook_path, read_only=False, data_only=False
-        )
+        source_workbook = None
+        for attempt in range(cls.FILE_ACCESS_RETRY_ATTEMPTS):
+            try:
+                source_workbook = openpyxl.load_workbook(
+                    workbook_path, read_only=False, data_only=False
+                )
+                break
+            except PermissionError as exc:
+                if attempt == cls.FILE_ACCESS_RETRY_ATTEMPTS - 1:
+                    raise PermissionError(
+                        "Windows kept denying access to the ETL working workbook: "
+                        f"{workbook_path}. Close it in Excel and wait for OneDrive "
+                        "to finish syncing, then retry."
+                    ) from exc
+                time.sleep(cls.FILE_ACCESS_RETRY_DELAY_SECONDS)
         merged_rows = {}
         start_positions = {}
         try:

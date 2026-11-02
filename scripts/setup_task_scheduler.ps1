@@ -1,4 +1,4 @@
-# Registers the daily Revenue Analysis job at 08:30 local time, every day.
+# Registers the daily Revenue Analysis job at 07:00 local time, every day.
 $ErrorActionPreference = "Stop"
 
 $TaskName = "RevenueAnalysisDailyETL"
@@ -11,7 +11,7 @@ Write-Host "Working Directory: $ProjectDir"
 Write-Host "Batch Executable: $BatPath"
 
 $Action = New-ScheduledTaskAction -Execute $BatPath -WorkingDirectory $ProjectDir
-$Trigger = New-ScheduledTaskTrigger -Daily -At "07:00"
+$Trigger = New-ScheduledTaskTrigger -Daily -At "10:58"
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 

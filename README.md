@@ -11,7 +11,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    git clone https://github.com/yodahuncho00/revenue_analysis_updater.git
    cd revenue_analysis_updater
    ```
-4. Copy the authorized `05. Revenue_analysis.xlsx` into the project root.
+4. Copy the authorized `05. Revenue_analysis_Gateway.xlsx` into the project root.
 5. Install project dependencies and Chromium:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
@@ -28,7 +28,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    .venv\Scripts\python.exe scripts\refresh_backoffice_session.py
    ```
    Session state is saved per Windows user. Do not copy `data\storage_state.json` or the browser profile from another computer.
-7. Register the daily task at 08:30 local time:
+7. Register the daily task at 07:00 local time:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
    ```
@@ -36,7 +36,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
 
 ## Daily workflow
 
-The scheduled task calls `scripts\run_daily_etl.bat`, which runs `main.py`. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard.html` from the workbook. If the workbook update or dashboard refresh fails, the batch job creates `ATTENTION - Revenue update failed.txt` and displays a popup with the error, run ID, and paths to the detailed log and report. Login or OTP failures include the session refresh command. You can run the same sequence manually with:
+The scheduled task calls `scripts\run_daily_etl.bat`, which runs `main.py`. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard_Gateway.html` from the workbook. If the workbook update or dashboard refresh fails, the batch job creates `ATTENTION - Revenue update failed.txt` and displays a popup with the error, run ID, and paths to the detailed log and report. Login or OTP failures include the session refresh command. You can run the same sequence manually with:
 
 ```powershell
 scripts\run_daily_etl.bat
@@ -47,7 +47,7 @@ To verify that Windows popups are visible without running the ETL or changing th
 scripts\run_daily_etl.bat --test-alert
 ```
 
-The dashboard output and workbook are local generated/private files and are ignored by Git. The HTML template is `templates/05. Revenue_dashboard.template.html`.
+The dashboard output and workbook are local generated/private files and are ignored by Git. The HTML template is `templates/05. Revenue_dashboard_Gateway.template.html`.
 
 ## Keep one runner per workbook
 

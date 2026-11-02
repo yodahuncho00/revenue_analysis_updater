@@ -8,7 +8,9 @@ app:
   first_of_month_behavior: "process_prior_month"  # "process_prior_month" or "skip_steps_1_6"
 
 paths:
-  workbook_path: "05. Revenue_analysis.xlsx"
+  workbook_path: "05. Revenue_analysis_Gateway.xlsx"
+  dashboard_path: "05. Revenue_dashboard_Gateway.html"
+  dashboard_template_path: "templates/05. Revenue_dashboard_Gateway.template.html"
   backup_dir: "data/backups"
   raw_dir: "data/raw"
   reports_dir: "data/reports"

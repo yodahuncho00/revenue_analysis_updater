@@ -18,7 +18,7 @@ def test_workbook(tmp_path):
     with open("config.yaml", "r", encoding="utf-8") as f:
         cfg_text = f.read()
 
-    cfg_text = cfg_text.replace('workbook_path: "05. Revenue_analysis.xlsx"', f'workbook_path: "{str(dst).replace(chr(92), "/")}"')
+    cfg_text = cfg_text.replace('workbook_path: "05. Revenue_analysis_Gateway.xlsx"', f'workbook_path: "{str(dst).replace(chr(92), "/")}"')
     cfg_text = cfg_text.replace('backup_dir: "data/backups"', f'backup_dir: "{str(tmp_path / "backups").replace(chr(92), "/")}"')
     cfg_text = cfg_text.replace('reports_dir: "data/reports"', f'reports_dir: "{str(tmp_path / "reports").replace(chr(92), "/")}"')
     

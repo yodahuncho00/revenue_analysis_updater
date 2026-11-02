@@ -25,7 +25,7 @@ def _rows(sheet, start_row, key_column=1):
             yield values
 
 
-def _build_data(workbook):
+def _build_data(workbook, source_name="Excel workbook"):
     data_sheet = workbook["Data"]
     facts = []
     for row in _rows(data_sheet, 5):
@@ -56,7 +56,31 @@ def _build_data(workbook):
         "months_el": control_sheet["B17"].value,
         "zoyk_share": control_sheet["B18"].value,
         "include_test": control_sheet["B20"].value,
+        "tol_match_lcy": control_sheet["B21"].value,
+        "tol_minor_usd": control_sheet["B22"].value,
+            "file_ccy": control_sheet["B24"].value,
     }
+
+    fx_sheet = workbook["FX"]
+    fx_ccys = [
+        str(fx_sheet.cell(5, column).value)
+        for column in range(5, 15)
+        if fx_sheet.cell(5, column).value
+    ]
+    data_ccys = {fact["ccy"] for fact in facts if fact["ccy"]}
+    fx = []
+    for row in fx_sheet.iter_rows(min_row=6, values_only=True):
+        key, year, month = row[0], row[2], row[3]
+        if not key or year is None or month is None:
+            continue
+        fx.append({
+            "key": str(key),
+            "label": _json_value(row[1]),
+            "year": int(year),
+            "month": int(month),
+            "avg": {ccy: row[4 + index] for index, ccy in enumerate(fx_ccys)},
+            "close": {ccy: row[16 + index] for index, ccy in enumerate(fx_ccys)},
+        })
 
     merchant_sheet = workbook["Merchant_master"]
     merchant_master = [{
@@ -99,13 +123,19 @@ def _build_data(workbook):
         "merchant_recon": recon_rows("Merchant_Balance", "merchant"),
         "provider_recon": recon_rows("Provider_Balance", "provider"),
         "offer_card": offer_card,
+        "fx": fx,
+        "meta": [{
+            "fx_ccys": [ccy for ccy in fx_ccys if ccy in data_ccys],
+            "source": source_name,
+            "exported": datetime.now().isoformat(timespec="minutes"),
+        }],
     }
 
 
 def update_dashboard(workbook_path, template_path, dashboard_path):
     workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     try:
-        data = _build_data(workbook)
+        data = _build_data(workbook, Path(workbook_path).name)
     finally:
         workbook.close()
 
@@ -115,14 +145,14 @@ def update_dashboard(workbook_path, template_path, dashboard_path):
     marker = "const D = "
     start = html.find(marker)
     if start < 0:
-        raise ValueError(f"Could not find embedded dashboard data in {dashboard_path}.")
+        raise ValueError(f"Could not find embedded dashboard data in {template_path}.")
     end = html.find("\n", start + len(marker))
     if end < 0:
-        raise ValueError(f"Could not find the end of embedded dashboard data in {dashboard_path}.")
+        raise ValueError(f"Could not find the end of embedded dashboard data in {template_path}.")
     serialized = json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     semicolon = html.rfind(";", start, end)
     if semicolon < 0:
-        raise ValueError(f"Could not find the end of the dashboard data statement in {dashboard_path}.")
+        raise ValueError(f"Could not find the end of the dashboard data statement in {template_path}.")
     updated_html = html[:start + len(marker)] + serialized + html[semicolon:]
 
     dashboard_path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,12 +174,12 @@ def update_dashboard(workbook_path, template_path, dashboard_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workbook", default=str(PROJECT_ROOT / "05. Revenue_analysis.xlsx"))
+    parser.add_argument("--workbook", default=str(PROJECT_ROOT / "05. Revenue_analysis_Gateway.xlsx"))
     parser.add_argument(
         "--template",
-        default=str(PROJECT_ROOT / "templates" / "05. Revenue_dashboard.template.html"),
+        default=str(PROJECT_ROOT / "templates" / "05. Revenue_dashboard_Gateway.template.html"),
     )
-    parser.add_argument("--dashboard", default=str(PROJECT_ROOT / "05. Revenue_dashboard.html"))
+    parser.add_argument("--dashboard", default=str(PROJECT_ROOT / "05. Revenue_dashboard_Gateway.html"))
     args = parser.parse_args()
     count = update_dashboard(args.workbook, args.template, args.dashboard)
     print(f"Updated {args.dashboard} from {args.workbook} ({count} data rows).")

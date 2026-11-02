@@ -1,7 +1,7 @@
 # Operations Runbook: Autonomous Revenue Analysis ETL Pipeline
 
 **System:** Revenue Analysis Daily Updater  
-**Primary Workbook:** `05. Revenue_analysis.xlsx`  
+**Primary Workbook:** `05. Revenue_analysis_Gateway.xlsx`
 **Configuration:** `config.yaml`  
 **Timezone:** `UTC+3`
 
@@ -81,8 +81,8 @@ calculated balance values appear once per account group; provider liabilities
 are written against their individual provider IDs.
 
 ### 1.3 Normal Production Daily Run
-Runs the complete ETL pipeline, atomically commits updates to `05. Revenue_analysis.xlsx`,
-then refreshes `05. Revenue_dashboard.html` from the committed workbook:
+Runs the complete ETL pipeline, atomically commits updates to `05. Revenue_analysis_Gateway.xlsx`,
+then refreshes `05. Revenue_dashboard_Gateway.html` from the committed workbook:
 ```bash
 python main.py
 ```
@@ -136,7 +136,7 @@ The pipeline is inherently self-healing after missed runs (e.g. holidays, downti
 ## 3. Disaster Recovery & Restoring Backups
 
 Every single ETL run automatically creates a timestamped backup in `data/backups/` before any changes are made:
-`data/backups/05. Revenue_analysis_YYYYMMDD_HHMMSS.xlsx`
+`data/backups/05. Revenue_analysis_Gateway_YYYYMMDD_HHMMSS.xlsx`
 
 ### To restore a backup:
 1. Close Microsoft Excel if open.
@@ -146,7 +146,7 @@ Every single ETL run automatically creates a timestamped backup in `data/backups
    ```
 3. Copy the desired backup over the production workbook:
    ```powershell
-   Copy-Item -Path "data\backups\05. Revenue_analysis_20261028_150913.xlsx" -Destination "05. Revenue_analysis.xlsx" -Force
+   Copy-Item -Path "data\backups\05. Revenue_analysis_Gateway_20261028_150913.xlsx" -Destination "05. Revenue_analysis_Gateway.xlsx" -Force
    ```
 4. Verify the file opens normally in Excel.
 
@@ -172,9 +172,10 @@ computer becomes available, if Windows permits it.
 |---|---|---|
 | `StructureValidationError: Target workbook does not exist` | File was renamed or moved. | Verify `config.yaml` points to the correct workbook path. |
 | `StructureValidationError: Workbook is locked or currently open` | Excel has an exclusive lock on the file. | Close Excel or save your work and re-run. |
+| `PermissionError` opening `*.working.xlsx` during balance paste | Windows or OneDrive temporarily denied access to the working copy. The paste step retries briefly before failing with recovery guidance. | Close the working copy in Excel, wait for OneDrive to finish syncing, and rerun. If it persists, check OneDrive sync status and the file's Security permissions. |
 | `Backoffice authentication is required` / `login or verification form` | The saved session expired or OTP/login is required. | Run `python scripts\refresh_backoffice_session.py`, complete login and OTP, then retry. Production remains untouched on this failure. |
 | `Dashboard did not become ready` | Backoffice did not show its expected controls and no login form was detected. | Check network/VPN/Backoffice availability; inspect the run log and retry after service is restored. |
-| `CopyManagerError: Another ETL run is in progress (.lock exists)` | A previous run crashed or is currently executing. | Confirm no Python process is running, then remove `05. Revenue_analysis.xlsx.lock`. |
+| `CopyManagerError: Another ETL run is already active` / `A previous ETL process may still be running` | Another update owns the per-workbook OS mutex, or an older lock marker belongs to a live process. A hard stop releases the mutex automatically; the next run removes the abandoned marker. | If the message repeats, check Task Manager for `main.py` and let any active ETL finish before retrying. Do not delete the lock while a run is active. |
 | `RawValidationError: Hierarchy sum mismatch` | Sum of child rows does not foot to parent row in Backoffice table. | Check `data/raw/<run_id>/dashboard.json` for corrupted data in source Backoffice. |
 | `RawValidationError: Duplicate key found in raw leaf rows` | The Backoffice returned multiple rows with the exact same route key. | Inspect source Backoffice filters or route configuration. |
 | `RawValidationError: Duplicate Settlements/Topups ID` | A fetched ID already exists in the sheet. | Verify Backoffice date filters and ID ordering. |
@@ -192,21 +193,21 @@ Before going fully live, run the autonomous pipeline in shadow mode:
    ```powershell
    python -c "
    import openpyxl
-   wb1 = openpyxl.load_workbook('05. Revenue_analysis.xlsx', data_only=True)
-   wb2 = openpyxl.load_workbook('05. Revenue_analysis.xlsx.working.xlsx', data_only=True)
+   wb1 = openpyxl.load_workbook('05. Revenue_analysis_Gateway.xlsx', data_only=True)
+   wb2 = openpyxl.load_workbook('05. Revenue_analysis_Gateway.xlsx.working.xlsx', data_only=True)
    # Assert cell equality across key tabs
    "
    ```
 3. Once satisfied with complete cell-by-cell equality over 3–5 days, activate the automated Windows Task Scheduler job.
 
 ### Task Scheduler Notes
-Install or update the daily job at 08:30 local time (all seven days) from a
+Install or update the daily job at 07:00 local time (all seven days) from a
 PowerShell prompt in the project directory:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
 ```
 The task runs the ETL and, only after a successful workbook update, regenerates
-`05. Revenue_dashboard.html` from the updated workbook. It is configured to wake
+`05. Revenue_dashboard_Gateway.html` from the updated workbook. It is configured to wake
 the computer from sleep when Windows and the hardware permit wake timers, and to
 start a missed run once the computer is available. It cannot start a computer that
 is fully powered off. If a run fails, it writes `ATTENTION - Revenue update failed.txt`

@@ -6,8 +6,8 @@ $ErrorActionPreference = "Stop"
 $ProjectDir = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $ProjectDir
 
-if (-not (Test-Path -LiteralPath (Join-Path $ProjectDir "05. Revenue_analysis.xlsx"))) {
-    throw "05. Revenue_analysis.xlsx is missing. Copy the authorized workbook into the project folder first."
+if (-not (Test-Path -LiteralPath (Join-Path $ProjectDir "05. Revenue_analysis_Gateway.xlsx"))) {
+    throw "05. Revenue_analysis_Gateway.xlsx is missing. Copy the authorized workbook into the project folder first."
 }
 
 $PythonLauncher = Get-Command py -ErrorAction SilentlyContinue
@@ -45,8 +45,8 @@ foreach ($Directory in @("data\logs", "data\raw", "data\exports", "data\reports"
     New-Item -ItemType Directory -Force -Path (Join-Path $ProjectDir $Directory) | Out-Null
 }
 
-$DashboardOutput = Join-Path $ProjectDir "05. Revenue_dashboard.html"
-$DashboardTemplate = Join-Path $ProjectDir "templates\05. Revenue_dashboard.template.html"
+$DashboardOutput = Join-Path $ProjectDir "05. Revenue_dashboard_Gateway.html"
+$DashboardTemplate = Join-Path $ProjectDir "templates\05. Revenue_dashboard_Gateway.template.html"
 if (-not (Test-Path -LiteralPath $DashboardOutput)) {
     Copy-Item -LiteralPath $DashboardTemplate -Destination $DashboardOutput
 }

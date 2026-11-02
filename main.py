@@ -440,14 +440,17 @@ def run_pipeline(
             logger.info("Production workbook updated successfully.")
 
             project_root = os.path.dirname(os.path.abspath(__file__))
+            dashboard_template_path = config["paths"].get(
+                "dashboard_template_path",
+                os.path.join("templates", "05. Revenue_dashboard_Gateway.template.html"),
+            )
+            dashboard_path = config["paths"].get(
+                "dashboard_path", "05. Revenue_dashboard_Gateway.html"
+            )
             dashboard_rows = update_dashboard(
                 workbook_path=os.path.abspath(prod_path),
-                template_path=os.path.join(
-                    project_root, "templates", "05. Revenue_dashboard.template.html"
-                ),
-                dashboard_path=os.path.join(
-                    project_root, "05. Revenue_dashboard.html"
-                ),
+                template_path=os.path.abspath(os.path.join(project_root, dashboard_template_path)),
+                dashboard_path=os.path.abspath(os.path.join(project_root, dashboard_path)),
             )
             checks_passed.append("html_dashboard_refreshed")
             logger.info(

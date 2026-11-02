@@ -1,6 +1,9 @@
 import os
 import shutil
 import hashlib
+import sys
+import ctypes
+import re
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -17,6 +20,8 @@ class CopyManager:
         self.lock_file = f"{self.prod_path}.lock"
         self.working_copy_path = f"{self.prod_path}.working.xlsx"
         self.is_locked = False
+        self._mutex_handle = None
+        self._lock_fd = None
         os.makedirs(self.backup_dir, exist_ok=True)
 
     @staticmethod
@@ -28,25 +33,126 @@ class CopyManager:
         return h.hexdigest()
 
     def acquire_lock(self) -> None:
-        if os.path.exists(self.lock_file):
-            raise CopyManagerError(
-                f"Another ETL run is in progress or lock file was abandoned: {self.lock_file}. "
-                "Confirm no other process is running before removing the lock."
-            )
+        if sys.platform == "win32":
+            self._acquire_windows_mutex()
+        else:
+            self._acquire_posix_file_lock()
+            return
+
         try:
+            # The OS lock is authoritative. A leftover marker is safe to remove
+            # only after acquiring it, which also recovers after a hard stop.
+            if os.path.exists(self.lock_file):
+                old_pid = self._read_lock_pid()
+                if old_pid is None or self._is_pid_running(old_pid):
+                    raise CopyManagerError(
+                        f"A previous ETL process may still be running (lock: {self.lock_file})."
+                    )
+                os.remove(self.lock_file)
+
             with open(self.lock_file, "x") as f:
                 f.write(f"pid={os.getpid()}, timestamp={datetime.now().isoformat()}\n")
             self.is_locked = True
-        except Exception as e:
-            raise CopyManagerError(f"Failed to acquire single-run lock: {e}")
+        except Exception:
+            self._release_os_lock()
+            raise
+
+    def _acquire_windows_mutex(self) -> None:
+        """Acquire a kernel mutex that Windows releases automatically on exit."""
+        digest = hashlib.sha256(os.path.normcase(self.prod_path).encode("utf-8")).hexdigest()[:24]
+        name = f"Local\\RevenueAnalysisUpdater_{digest}"
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p)
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        kernel32.WaitForSingleObject.restype = ctypes.c_ulong
+        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            raise CopyManagerError(f"Could not create ETL run mutex (Windows error {ctypes.get_last_error()}).")
+
+        wait_result = kernel32.WaitForSingleObject(handle, 0)
+        if wait_result == 0x00000102:  # WAIT_TIMEOUT: another run owns the mutex
+            kernel32.CloseHandle(handle)
+            raise CopyManagerError("Another ETL run is already active for this workbook.")
+        if wait_result not in (0x00000000, 0x00000080):  # WAIT_OBJECT_0 / WAIT_ABANDONED
+            error = ctypes.get_last_error()
+            kernel32.CloseHandle(handle)
+            raise CopyManagerError(f"Could not acquire ETL run mutex (Windows error {error}).")
+        self._mutex_handle = handle
+
+    def _acquire_posix_file_lock(self) -> None:
+        import fcntl
+
+        self._lock_fd = open(self.lock_file, "a+")
+        try:
+            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            self._lock_fd.close()
+            self._lock_fd = None
+            raise CopyManagerError("Another ETL run is already active for this workbook.") from exc
+        self._lock_fd.seek(0)
+        self._lock_fd.truncate()
+        self._lock_fd.write(f"pid={os.getpid()}, timestamp={datetime.now().isoformat()}\n")
+        self._lock_fd.flush()
+        self.is_locked = True
+
+    def _read_lock_pid(self) -> Optional[int]:
+        try:
+            with open(self.lock_file, "r", encoding="utf-8") as lock:
+                match = re.search(r"\bpid=(\d+)\b", lock.read())
+            return int(match.group(1)) if match else None
+        except OSError:
+            return None
+
+    @staticmethod
+    def _is_pid_running(pid: int) -> bool:
+        if sys.platform == "win32":
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+            kernel32.WaitForSingleObject.restype = ctypes.c_ulong
+            kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+            handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if not handle:
+                return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER means no such PID
+            try:
+                return kernel32.WaitForSingleObject(handle, 0) == 0x00000102  # WAIT_TIMEOUT
+            finally:
+                kernel32.CloseHandle(handle)
+
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def _release_os_lock(self) -> None:
+        if self._mutex_handle:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.ReleaseMutex.argtypes = (ctypes.c_void_p,)
+            kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+            kernel32.ReleaseMutex(self._mutex_handle)
+            kernel32.CloseHandle(self._mutex_handle)
+            self._mutex_handle = None
+        if self._lock_fd:
+            import fcntl
+
+            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+            self._lock_fd.close()
+            self._lock_fd = None
 
     def release_lock(self) -> None:
-        if self.is_locked and os.path.exists(self.lock_file):
+        if self.is_locked:
             try:
-                os.remove(self.lock_file)
-            except Exception:
-                pass
-            self.is_locked = False
+                if sys.platform == "win32" and os.path.exists(self.lock_file):
+                    os.remove(self.lock_file)
+            finally:
+                self._release_os_lock()
+                self.is_locked = False
 
     def create_backup(self) -> Tuple[str, str]:
         """Creates a timestamped backup before any change. Returns (backup_path, sha256)."""
