@@ -6,6 +6,7 @@ import json
 import re
 import csv
 import io
+import calendar
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -143,11 +144,190 @@ class PlaywrightExtractor(BaseExtractor):
             )
         except PlaywrightTimeoutError as exc:
             self._assert_authenticated(page)
+            try:
+                visible_buttons = page.locator("button:visible").all_inner_texts()
+                visible_buttons = [" ".join(text.split()) for text in visible_buttons]
+                visible_buttons = [text for text in visible_buttons if text][:30]
+            except Exception:
+                visible_buttons = []
+            try:
+                page_title = page.title()
+            except Exception:
+                page_title = "(unavailable)"
             raise PlaywrightExtractionError(
                 f"{page_name} did not become ready: the expected Backoffice controls "
                 f"were not visible at {page.url}. Check network access and whether "
-                "the Backoffice page layout has changed."
+                f"the Backoffice page layout has changed. Page title: {page_title!r}; "
+                f"visible button labels: {visible_buttons!r}."
             ) from exc
+
+    @staticmethod
+    def _date_picker_diagnostics(page: Any) -> str:
+        """Summarize visible date-picker controls when Backoffice UI changes."""
+        try:
+            inputs = page.locator("input:visible").evaluate_all(
+                "elements => elements.map(el => ({type: el.type, label: "
+                "el.getAttribute('aria-label'), placeholder: el.placeholder, "
+                "value: el.value}))"
+            )[:20]
+        except Exception:
+            inputs = []
+        try:
+            buttons = page.locator("button:visible").all_inner_texts()
+            buttons = [" ".join(text.split()) for text in buttons if text.strip()][:40]
+        except Exception:
+            buttons = []
+        try:
+            popup_text = page.locator(
+                "[role='dialog']:visible, [role='menu']:visible, .q-menu:visible"
+            ).all_inner_texts()
+            popup_text = [" ".join(text.split())[:500] for text in popup_text[:4]]
+        except Exception:
+            popup_text = []
+        return (
+            f"visible inputs={inputs!r}; visible buttons={buttons!r}; "
+            f"open picker text={popup_text!r}"
+        )
+
+    @staticmethod
+    def _navigate_calendar_to(page: Any, target_date: date) -> None:
+        """Navigate the visible Quasar calendar to the target month."""
+        calendar_widget = page.locator(".q-date:visible").last
+        calendar_widget.wait_for(state="visible", timeout=10000)
+        navigation = calendar_widget.locator(".q-date__navigation")
+        buttons = navigation.locator("button")
+        button_texts = [" ".join(text.split()) for text in buttons.all_inner_texts()]
+        month_index = next(
+            (
+                index
+                for index, text in enumerate(button_texts)
+                if any(
+                    text.casefold() == month_name.casefold()
+                    for month_name in calendar.month_name[1:]
+                )
+            ),
+            None,
+        )
+        year_index = next(
+            (index for index, text in enumerate(button_texts) if re.fullmatch(r"\d{4}", text)),
+            None,
+        )
+        if month_index is None or year_index is None or len(button_texts) < 6:
+            raise PlaywrightExtractionError(
+                "Could not identify the calendar month/year navigation. "
+                f"Navigation buttons: {button_texts!r}. "
+                f"{PlaywrightExtractor._date_picker_diagnostics(page)}"
+            )
+
+        for _ in range(24):
+            button_texts = [" ".join(text.split()) for text in buttons.all_inner_texts()]
+            current_month = next(
+                (
+                    month
+                    for month in range(1, 13)
+                    if button_texts[month_index].casefold()
+                    == calendar.month_name[month].casefold()
+                ),
+                None,
+            )
+            current_year = int(button_texts[year_index]) if button_texts[year_index].isdigit() else None
+            if current_month is None or current_year is None:
+                raise PlaywrightExtractionError(
+                    f"Could not read calendar month/year from {button_texts!r}."
+                )
+            current_month_number = current_year * 12 + current_month - 1
+            target_month_number = target_date.year * 12 + target_date.month - 1
+            difference = target_month_number - current_month_number
+            if difference == 0:
+                break
+            arrow_index = month_index + 1 if difference > 0 else month_index - 1
+            buttons.nth(arrow_index).click()
+            page.wait_for_timeout(50)
+        else:
+            raise PlaywrightExtractionError(
+                f"Could not navigate calendar to {target_date:%B %Y}."
+            )
+
+    @staticmethod
+    def _click_calendar_day(page: Any, target_date: date) -> None:
+        """Click the target date in the currently displayed Quasar calendar month."""
+        calendar_widget = page.locator(".q-date:visible").last
+        calendar_widget.wait_for(state="visible", timeout=5000)
+        day_cells = calendar_widget.locator(".q-date__calendar-item")
+        matching_indices = day_cells.evaluate_all(
+            "(cells, day) => cells.map((cell, index) => ({cell, index}))"
+            ".filter(({cell}) => {"
+            "const button = cell.querySelector('button');"
+            "const text = (button || cell).innerText.trim();"
+            "const classes = String(cell.className || '');"
+            "return text === String(day) && !classes.includes('--out');"
+            "}).map(({index}) => index)",
+            target_date.day,
+        )
+        if len(matching_indices) != 1:
+            raise PlaywrightExtractionError(
+                f"Calendar did not expose one selectable day {target_date.day} "
+                f"for {target_date:%B %Y}; matching cells: {matching_indices!r}. "
+                f"{PlaywrightExtractor._date_picker_diagnostics(page)}"
+            )
+        cell = day_cells.nth(matching_indices[0])
+        day_button = cell.locator("button")
+        if day_button.count():
+            day_button.click()
+        else:
+            cell.click()
+
+    @classmethod
+    def _prepare_calendar_date_range(
+        cls, page: Any, date_filter: Any, from_date: date, to_date: date
+    ) -> None:
+        date_filter.click()
+        try:
+            page.locator(".q-date:visible").last.wait_for(
+                state="visible", timeout=10000
+            )
+        except Exception as exc:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+            if not isinstance(exc, PlaywrightTimeoutError):
+                raise
+            raise PlaywrightExtractionError(
+                "The Date control did not open a Quasar calendar. "
+                f"{cls._date_picker_diagnostics(page)}"
+            ) from exc
+
+        # This picker defaults to 00:00 and 23:59. Set them explicitly when its
+        # time inputs are exposed so API validation always covers whole days.
+        time_inputs = page.locator("input[type='time']:visible")
+        if time_inputs.count() == 2:
+            time_inputs.nth(0).fill("00:00")
+            time_inputs.nth(1).fill("23:59")
+
+        cls._navigate_calendar_to(page, from_date)
+        cls._click_calendar_day(page, from_date)
+        cls._navigate_calendar_to(page, to_date)
+
+    @classmethod
+    def _select_calendar_end_date(
+        cls, page: Any, date_filter: Any, to_date: date
+    ) -> None:
+        cls._click_calendar_day(page, to_date)
+        if page.locator(".q-date:visible").count():
+            date_filter.click()
+
+    @staticmethod
+    def _normalize_date_filters(filters: Any) -> Any:
+        """Ignore an optional zero-millisecond suffix in Backoffice timestamps."""
+        if not isinstance(filters, dict):
+            return filters
+        normalized = dict(filters)
+        date_filter = filters.get("date")
+        if isinstance(date_filter, dict):
+            normalized["date"] = {
+                key: value.removesuffix(".000") if isinstance(value, str) else value
+                for key, value in date_filter.items()
+            }
+        return normalized
 
     def _save_raw(self, name: str, data: Any, metadata: Dict[str, Any]) -> str:
         if not self.raw_storage_dir:
@@ -558,9 +738,6 @@ class PlaywrightExtractor(BaseExtractor):
         url = self.routes.get("dashboard")
         if not url:
             raise PlaywrightExtractionError("Backoffice dashboard route is not configured.")
-        from_str = f"{from_date.strftime('%Y-%m-%d')} 00:00:00"
-        to_str = f"{to_date.strftime('%Y-%m-%d')} 23:59:59"
-
         with sync_playwright() as p:
             context = self.launch_persistent_context(p)
             page = context.new_page()
@@ -572,7 +749,9 @@ class PlaywrightExtractor(BaseExtractor):
                         "navigation_timeout_ms", 60000
                     ),
                 )
-                reset_filters = page.get_by_role("button", name="Reset Filters", exact=True)
+                reset_filters = page.get_by_role(
+                    "button", name=re.compile(r"Reset(?: Filters| all)", re.IGNORECASE)
+                ).first
                 self._wait_for_backoffice_ready(page, reset_filters, "Dashboard")
 
                 reset_filters.click()
@@ -582,21 +761,17 @@ class PlaywrightExtractor(BaseExtractor):
                 if usd_toggle.get_attribute("aria-checked") != "false":
                     raise PlaywrightExtractionError("Could not verify that Show in USD is off.")
 
-                date_filter = page.locator("button.u-filter").filter(has_text="Date").first
-                date_filter.click()
-                from_input = page.get_by_role("textbox", name="From", exact=True)
-                to_input = page.get_by_role("textbox", name="To", exact=True)
-                if from_input.count() != 1 or to_input.count() != 1:
-                    raise PlaywrightExtractionError(
-                        "Dashboard date picker did not expose exactly one From and To field."
-                    )
-                from_input.fill(from_str)
-                to_input.fill(to_str)
+                date_filter = page.get_by_role(
+                    "button", name=re.compile(r"^Date\b", re.IGNORECASE)
+                ).first
+                self._prepare_calendar_date_range(
+                    page, date_filter, from_date, to_date
+                )
                 with page.expect_response(
                     lambda response: "/summary?" in response.url and from_date.isoformat() in response.url,
                     timeout=self.bo_cfg.get("browser", {}).get("timeout_ms", 30000),
                 ) as response_info:
-                    page.get_by_role("button", name="Apply", exact=True).click()
+                    self._select_calendar_end_date(page, date_filter, to_date)
 
                 response = response_info.value
                 if not response.ok:
@@ -606,11 +781,12 @@ class PlaywrightExtractor(BaseExtractor):
                 body = response.json()
                 summary_rows = body.get("summary")
                 filters = body.get("filters", {})
-                expected_from = f"{from_date:%Y-%m-%d} 00:00:00.000"
+                expected_from = f"{from_date:%Y-%m-%d} 00:00:00"
                 expected_to = f"{to_date:%Y-%m-%d} 23:59:59.999"
                 if not isinstance(summary_rows, list):
                     raise PlaywrightExtractionError("Dashboard summary response has no summary row list.")
-                if filters.get("date", {}).get("gte") != expected_from or filters.get("date", {}).get("lt") != expected_to:
+                expected_date_filter = {"gte": expected_from, "lt": expected_to}
+                if self._normalize_date_filters(filters).get("date") != expected_date_filter:
                     raise PlaywrightExtractionError(
                         f"Dashboard response filter mismatch: expected {expected_from} through {expected_to}, "
                         f"received {filters!r}."
@@ -618,12 +794,6 @@ class PlaywrightExtractor(BaseExtractor):
                 if set(filters) - {"date"}:
                     raise PlaywrightExtractionError(
                         f"Unexpected active Dashboard filters were returned: {filters!r}."
-                    )
-
-                applied_filter_text = " ".join(date_filter.inner_text().split())
-                if from_str not in applied_filter_text or to_str not in applied_filter_text:
-                    raise PlaywrightExtractionError(
-                        f"Dashboard did not confirm the requested date range: {applied_filter_text!r}."
                     )
 
                 page.wait_for_function(
@@ -664,7 +834,9 @@ class PlaywrightExtractor(BaseExtractor):
             with self._authenticated_page(playwright, url) as page:
                 self._wait_for_backoffice_ready(
                     page,
-                    page.get_by_role("button", name="Reset Filters", exact=True),
+                    page.get_by_role(
+                        "button", name=re.compile(r"Reset(?: Filters| all)", re.IGNORECASE)
+                    ).first,
                     "Merchant Balance",
                 )
                 page.wait_for_selector("tbody tr.account-row")
@@ -712,7 +884,9 @@ class PlaywrightExtractor(BaseExtractor):
             ) as page:
                 self._wait_for_backoffice_ready(
                     page,
-                    page.get_by_role("button", name="Reset Filters", exact=True),
+                    page.get_by_role(
+                        "button", name=re.compile(r"Reset(?: Filters| all)", re.IGNORECASE)
+                    ).first,
                     "Provider Balance",
                 )
                 page.wait_for_selector("tbody tr.account-row")
@@ -850,31 +1024,35 @@ class PlaywrightExtractor(BaseExtractor):
             )
 
         route_path = urlparse(url).path
-        from_str = f"{from_date:%Y-%m-%d} 00:00:00"
-        to_str = f"{to_date:%Y-%m-%d} 23:59:59"
         expected_filters = {
             "date": {
                 "gte": f"{from_date:%Y-%m-%d} 00:00:00.000",
                 "lt": f"{to_date:%Y-%m-%d} 23:59:59.999",
             }
         }
+        from_str = f"{from_date:%Y-%m-%d} 00:00:00"
+        to_str = f"{to_date:%Y-%m-%d} 23:59:59"
 
         with sync_playwright() as playwright:
             with self._authenticated_page(playwright, url) as page:
-                reset = page.get_by_role("button", name="Reset Filters", exact=True)
+                reset = page.get_by_role(
+                    "button", name=re.compile(r"Reset(?: Filters| all)", re.IGNORECASE)
+                ).first
                 self._wait_for_backoffice_ready(page, reset, capture_name.title())
                 reset.click()
-                date_filter = page.locator("button.u-filter").filter(has_text="Date").first
+                date_filter = page.get_by_role(
+                    "button", name=re.compile(r"^Date\b", re.IGNORECASE)
+                ).first
                 date_filter.click()
                 from_input = page.get_by_role("textbox", name="From", exact=True)
                 to_input = page.get_by_role("textbox", name="To", exact=True)
                 if from_input.count() != 1 or to_input.count() != 1:
                     raise PlaywrightExtractionError(
-                        f"{capture_name.title()} date picker did not expose exactly one From and To field."
+                        f"{capture_name.title()} date menu did not expose exactly one "
+                        f"From and To field. {self._date_picker_diagnostics(page)}"
                     )
                 from_input.fill(from_str)
                 to_input.fill(to_str)
-
                 timeout = self.bo_cfg.get("browser", {}).get(
                     "transaction_response_timeout_ms", 120000
                 )
@@ -899,18 +1077,13 @@ class PlaywrightExtractor(BaseExtractor):
                 first_page = self._transaction_payload(response, 1)
                 response_body = response.json()
                 filters = response_body.get("props", {}).get("filters", {})
-                if filters != expected_filters:
+                if self._normalize_date_filters(filters) != self._normalize_date_filters(
+                    expected_filters
+                ):
                     raise PlaywrightExtractionError(
                         f"{capture_name.title()} response filter mismatch: expected "
                         f"{expected_filters!r}, received {filters!r}."
                     )
-                applied_filter_text = " ".join(date_filter.inner_text().split())
-                if from_str not in applied_filter_text or to_str not in applied_filter_text:
-                    raise PlaywrightExtractionError(
-                        f"{capture_name.title()} did not confirm the requested date range: "
-                        f"{applied_filter_text!r}."
-                    )
-
                 expected_total = first_page.get("total")
                 last_page = first_page.get("last_page")
                 if not isinstance(expected_total, int) or not isinstance(last_page, int) or last_page < 1:

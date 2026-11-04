@@ -23,7 +23,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    $env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000"
    .venv\Scripts\python.exe -m playwright install chromium
    ```
-6. Authenticate this computer interactively. Run the command below and complete login and OTP in the browser; the script continues when the Backoffice Dashboard is ready:
+6. Authenticate this computer interactively. Run the command below and complete login and OTP in the browser; the script continues when the authenticated Backoffice Dashboard opens:
    ```powershell
    .venv\Scripts\python.exe scripts\refresh_backoffice_session.py
    ```
@@ -36,7 +36,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
 
 ## Daily workflow
 
-The scheduled task calls `scripts\run_daily_etl.bat`. Before starting the ETL, it checks the saved Backoffice session. If login or OTP is required, it opens the browser and waits for the Dashboard to be ready; the ETL does not start until then. If login cannot be completed, it shows an alert and makes no workbook changes. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard_Gateway.html` from the workbook. Other ETL or dashboard failures also create `ATTENTION - Revenue update failed.txt` with the error, run ID, and diagnostic paths. You can run the same sequence manually with:
+The scheduled task calls `scripts\run_daily_etl.bat`. Before starting ETL, it opens Chromium and checks the Backoffice session. If login or OTP is required, complete it in the browser. Leave Chromium open; once an authenticated Dashboard opens, the script saves the session, closes Chromium, and starts ETL. If login cannot be completed, it shows an alert and makes no workbook changes. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard_Gateway.html` from the workbook. Other ETL or dashboard failures also create `ATTENTION - Revenue update failed.txt` with the error, run ID, and diagnostic paths. You can run the same sequence manually with:
 
 ```powershell
 scripts\run_daily_etl.bat

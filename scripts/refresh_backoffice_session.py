@@ -1,7 +1,9 @@
 import os
 import sys
 import argparse
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 from playwright.sync_api import sync_playwright
@@ -13,6 +15,34 @@ from extractors.playwright_extractor import (
     PlaywrightExtractionError,
     PlaywrightExtractor,
 )
+
+
+def wait_for_dashboard(extractor, context, dashboard_url: str, timeout_ms: int):
+    """Wait until an authenticated tab reaches the configured Dashboard route."""
+    dashboard_path = urlparse(dashboard_url).path.rstrip("/").lower()
+    deadline = time.monotonic() + timeout_ms / 1000
+    last_url = "(no open page)"
+    while time.monotonic() < deadline:
+        for page in context.pages:
+            if page.is_closed():
+                continue
+            last_url = page.url
+            try:
+                current_path = urlparse(page.url).path.rstrip("/").lower()
+                if current_path != dashboard_path:
+                    continue
+                extractor._assert_authenticated(page)
+                return page
+            except PlaywrightExtractionError:
+                continue
+        time.sleep(0.25)
+    raise PlaywrightExtractionError(
+        "Backoffice login was not confirmed: no open tab reached the authenticated "
+        "Dashboard route within "
+        f"{timeout_ms // 1000} seconds. "
+        f"Last observed page: {last_url}. Keep the browser open until the Dashboard "
+        "is verified; see data/logs/scheduler.log for details."
+    )
 
 
 def main(preflight: bool = False) -> None:
@@ -39,33 +69,8 @@ def main(preflight: bool = False) -> None:
 
     with sync_playwright() as playwright:
         extractor = PlaywrightExtractor(config)
-
         if preflight:
-            context = extractor.launch_persistent_context(playwright, headless=True)
-            needs_login = False
-            try:
-                page = context.new_page()
-                page.goto(
-                    dashboard_url,
-                    wait_until="domcontentloaded",
-                    timeout=backoffice.get("browser", {}).get("timeout_ms", 30000),
-                )
-                try:
-                    extractor._assert_authenticated(page)
-                except PlaywrightExtractionError:
-                    needs_login = True
-                if not needs_login:
-                    ready = page.get_by_role("button", name="Reset Filters", exact=True)
-                    extractor._wait_for_backoffice_ready(page, ready, "Dashboard")
-                    context.storage_state(path=state_path)
-                    print("Backoffice session is valid; starting the daily ETL.")
-                    return
-            finally:
-                context.close()
-
-            if needs_login:
-                print("Backoffice login is required before today's ETL can start.")
-
+            print("Checking Backoffice in Chromium before starting today's ETL.", flush=True)
         context = extractor.launch_persistent_context(playwright, headless=False)
         try:
             page = context.new_page()
@@ -74,7 +79,6 @@ def main(preflight: bool = False) -> None:
                 wait_until="domcontentloaded",
                 timeout=backoffice.get("browser", {}).get("timeout_ms", 30000),
             )
-            ready = page.get_by_role("button", name="Reset Filters", exact=True)
             try:
                 extractor._assert_authenticated(page)
             except PlaywrightExtractionError:
@@ -86,20 +90,26 @@ def main(preflight: bool = False) -> None:
                 print(
                     "Today's ETL is paused. Sign in and complete OTP in the visible "
                     "browser; if needed, open the Backoffice Dashboard. The ETL will "
-                    "continue once its controls are ready."
-                )
-                ready.wait_for(
-                    state="visible",
-                    timeout=backoffice.get("browser", {}).get(
-                        "login_timeout_ms", 600000
-                    ),
+                    "continue once the authenticated Dashboard opens.",
+                    flush=True,
                 )
             else:
-                print("Existing Playwright authentication found; reusing the profile.")
+                print(
+                    "Existing Playwright authentication found; reusing the profile.",
+                    flush=True,
+                )
 
-            extractor._wait_for_backoffice_ready(page, ready, "Dashboard")
+            page = wait_for_dashboard(
+                extractor,
+                context,
+                dashboard_url,
+                backoffice.get("browser", {}).get("login_timeout_ms", 600000),
+            )
             context.storage_state(path=state_path)
-            print(f"Authenticated session saved to {state_path}")
+            print(
+                f"Authenticated session saved to {state_path}; continuing to ETL.",
+                flush=True,
+            )
         finally:
             context.close()
 

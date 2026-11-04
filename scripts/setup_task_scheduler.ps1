@@ -11,7 +11,7 @@ Write-Host "Working Directory: $ProjectDir"
 Write-Host "Batch Executable: $BatPath"
 
 $Action = New-ScheduledTaskAction -Execute $BatPath -WorkingDirectory $ProjectDir
-$Trigger = New-ScheduledTaskTrigger -Daily -At "10:58"
+$Trigger = New-ScheduledTaskTrigger -Daily -At "10:33"
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 

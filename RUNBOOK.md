@@ -60,8 +60,9 @@ Backoffice asks for login or OTP, refresh the profile interactively:
 python scripts\refresh_backoffice_session.py
 ```
 Complete login and OTP in the visible browser, then open the Backoffice Dashboard
-if login does not redirect there. The script continues once it verifies the
-Dashboard is ready. Run the ETL and refresh utility under the same
+if login does not redirect there. Leave Chromium open; the script checks every
+open tab for the authenticated Dashboard route, saves the session, and closes
+Chromium itself. Run the ETL and refresh utility under the same
 Windows account, and do not run them concurrently because Chromium locks its profile.
 Treat both the profile and `data/storage_state.json` as passwords: they contain
 authentication data and must not be shared or committed.
