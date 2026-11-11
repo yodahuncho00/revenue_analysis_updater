@@ -18,23 +18,46 @@ from extractors.playwright_extractor import (
 
 
 def wait_for_dashboard(extractor, context, dashboard_url: str, timeout_ms: int):
-    """Wait until an authenticated tab reaches the configured Dashboard route."""
+    """Wait for sign-in, then route an authenticated tab to the Dashboard."""
     dashboard_path = urlparse(dashboard_url).path.rstrip("/").lower()
     deadline = time.monotonic() + timeout_ms / 1000
     last_url = "(no open page)"
+    redirected_urls = set()
     while time.monotonic() < deadline:
         for page in context.pages:
             if page.is_closed():
                 continue
             last_url = page.url
             try:
-                current_path = urlparse(page.url).path.rstrip("/").lower()
-                if current_path != dashboard_path:
-                    continue
                 extractor._assert_authenticated(page)
-                return page
             except PlaywrightExtractionError:
                 continue
+            current_path = urlparse(page.url).path.rstrip("/").lower()
+            if current_path == dashboard_path:
+                return page
+
+            if page.url not in redirected_urls:
+                print(
+                    "Backoffice sign-in is detected; opening the Dashboard "
+                    f"from {page.url}.",
+                    flush=True,
+                )
+                redirected_urls.add(page.url)
+            try:
+                page.goto(
+                    dashboard_url,
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+            except Exception:
+                continue
+            try:
+                extractor._assert_authenticated(page)
+            except PlaywrightExtractionError:
+                continue
+            if urlparse(page.url).path.rstrip("/").lower() == dashboard_path:
+                print("Authenticated Dashboard is ready; continuing to ETL.", flush=True)
+                return page
         time.sleep(0.25)
     raise PlaywrightExtractionError(
         "Backoffice login was not confirmed: no open tab reached the authenticated "

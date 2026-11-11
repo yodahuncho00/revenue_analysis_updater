@@ -114,13 +114,6 @@ class PlaywrightExtractor(BaseExtractor):
     def _assert_authenticated(page: Any) -> None:
         page_url = page.url
         path = urlparse(page_url).path
-        if re.search(r"/(login|sign[-_]?in|auth|otp|verification)(/|$)", path, re.IGNORECASE):
-            raise PlaywrightExtractionError(
-                f"Backoffice authentication is required (current page: {page_url}). "
-                "Refresh the saved session with "
-                "'python scripts\\refresh_backoffice_session.py', then retry."
-            )
-
         auth_inputs = page.locator(
             'input[type="password"], input[autocomplete="one-time-code"], '
             'input[name*="otp" i], input[name*="verification" i]'
@@ -132,6 +125,18 @@ class PlaywrightExtractor(BaseExtractor):
                     f"(current page: {page_url}). Refresh the saved session with "
                     "'python scripts\\refresh_backoffice_session.py', then retry."
                 )
+
+        if re.search(r"/(login|sign[-_]?in|auth|otp|verification)(/|$)", path, re.IGNORECASE):
+            signed_in_marker = page.get_by_role(
+                "button", name=re.compile(r"^Sign out$", re.IGNORECASE)
+            )
+            if signed_in_marker.count() and signed_in_marker.first.is_visible():
+                return
+            raise PlaywrightExtractionError(
+                f"Backoffice authentication is required (current page: {page_url}). "
+                "Refresh the saved session with "
+                "'python scripts\\refresh_backoffice_session.py', then retry."
+            )
 
     def _wait_for_backoffice_ready(self, page: Any, locator: Any, page_name: str) -> None:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError

@@ -155,7 +155,7 @@ Every single ETL run automatically creates a timestamped backup in `data/backups
 
 ## 4. Alert & Failure Diagnostic Catalog
 
-Treat all alerts as hard stop conditions. Failures before the atomic workbook commit leave the production workbook unchanged and retain the working copy for debugging. If the report includes `atomic_commit_successful`, the workbook was committed and a later step (such as the dashboard refresh) failed.
+Treat all alerts as hard stop conditions. Failures before the atomic workbook commit leave the production workbook unchanged and retain the working copy for debugging. Successful ETL and dry-run executions delete their working copy. If the report includes `atomic_commit_successful`, the workbook was committed and a later step (such as the dashboard refresh or working-copy cleanup) failed.
 
 The scheduled task's popup shows the run ID, the likely error, and direct paths to
 that run's log and report. If it says login or OTP is required, refresh the
@@ -173,7 +173,7 @@ computer becomes available, if Windows permits it.
 |---|---|---|
 | `StructureValidationError: Target workbook does not exist` | File was renamed or moved. | Verify `config.yaml` points to the correct workbook path. |
 | `StructureValidationError: Workbook is locked or currently open` | Excel has an exclusive lock on the file. | Close Excel or save your work and re-run. |
-| `PermissionError` opening `*.working.xlsx` during balance paste | Windows or OneDrive temporarily denied access to the working copy. The paste step retries briefly before failing with recovery guidance. | Close the working copy in Excel, wait for OneDrive to finish syncing, and rerun. If it persists, check OneDrive sync status and the file's Security permissions. |
+| `PermissionError` opening a working copy during balance paste | Windows denied access to the per-run working copy under `%LOCALAPPDATA%\RevenueAnalysisUpdater\WorkingCopies`. | Close any Excel window opened on that exact working-copy path and retry. Working copies now stay outside OneDrive; production is replaced only after all checks pass. |
 | `Backoffice authentication is required` / `login or verification form` | The saved session expired or OTP/login is required. | Run `python scripts\refresh_backoffice_session.py`, complete login and OTP, then retry. Production remains untouched on this failure. |
 | `PRE-FLIGHT LOGIN FAILED` | The daily batch could not verify or refresh the Backoffice session, so the ETL was not started. | Complete login/OTP in the opened browser and rerun `scripts\run_daily_etl.bat`. |
 | `Dashboard did not become ready` | Backoffice did not show its expected controls and no login form was detected. | Check network/VPN/Backoffice availability; inspect the run log and retry after service is restored. |

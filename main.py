@@ -138,7 +138,8 @@ def run_pipeline(
     copy_mgr = CopyManager(
         prod_path=prod_path,
         backup_dir=config["paths"]["backup_dir"],
-        backups_to_retain=config["app"].get("backups_to_retain", 30)
+        backups_to_retain=config["app"].get("backups_to_retain", 30),
+        run_id=run_id,
     )
 
     row_counts = {}
@@ -395,7 +396,7 @@ def run_pipeline(
                 helper_number_format=sheet_cfg["helper_number_format"],
             )
             logger.info(
-                f"Updated {sheet_name} summary formulas through row {end_row}"
+                f"Updated {sheet_name} summary and helper formulas through row {end_row}"
             )
 
         writer.save()
@@ -429,15 +430,15 @@ def run_pipeline(
         if dry_run:
             logger.info("[DRY RUN] All checks passed! Skipping atomic commit to production.")
             checks_passed.append("dry_run_commit_bypassed")
-            # Clean up working copy since all checks passed
-            if working_copy_path and os.path.exists(working_copy_path):
-                os.remove(working_copy_path)
-                logger.info(f"Deleted working copy: {working_copy_path}")
+            copy_mgr.cleanup_working_copy()
+            logger.info(f"Deleted working copy: {working_copy_path}")
         else:
             logger.info("Executing atomic commit to replace production workbook...")
             copy_mgr.commit()
             checks_passed.append("atomic_commit_successful")
             logger.info("Production workbook updated successfully.")
+            copy_mgr.cleanup_working_copy()
+            logger.info(f"Deleted working copy: {working_copy_path}")
 
             project_root = os.path.dirname(os.path.abspath(__file__))
             dashboard_template_path = config["paths"].get(
