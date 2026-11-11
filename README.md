@@ -1,6 +1,6 @@
 # Revenue Analysis Updater
 
-Windows ETL that updates the revenue analysis workbook from Backoffice and refreshes a standalone HTML dashboard. `main.py` rebuilds the dashboard after a successful workbook commit.
+Windows ETL that independently updates the Gateway and POS revenue workbooks from Backoffice and POS Portal, then refreshes both standalone HTML dashboards.
 
 ## Install on Windows
 
@@ -11,7 +11,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    git clone https://github.com/yodahuncho00/revenue_analysis_updater.git
    cd revenue_analysis_updater
    ```
-4. Copy the authorized `05. Revenue_analysis_Gateway.xlsx` into the project root.
+4. Copy the authorized `05. Revenue_analysis_Gateway.xlsx` and `05. Revenue_analysis_POS.xlsx` into the project root.
 5. Install project dependencies and Chromium:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
@@ -23,11 +23,11 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
    $env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000"
    .venv\Scripts\python.exe -m playwright install chromium
    ```
-6. Authenticate this computer interactively. Run the command below and complete login and OTP in the browser; the script continues when the authenticated Backoffice Dashboard opens:
+6. Authenticate this computer interactively. Run the command below and complete login and OTP in both browser tabs:
    ```powershell
    .venv\Scripts\python.exe scripts\refresh_backoffice_session.py
    ```
-   Session state is saved per Windows user. Do not copy `data\storage_state.json` or the browser profile from another computer.
+   Tab 1 is Backoffice and tab 2 is POS Payments. Session state is saved per Windows user. Do not copy `data\storage_state.json` or the browser profile from another computer.
 7. Register the daily task at 10:58 local time:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
@@ -36,7 +36,7 @@ Windows ETL that updates the revenue analysis workbook from Backoffice and refre
 
 ## Daily workflow
 
-The scheduled task calls `scripts\run_daily_etl.bat`. Before starting ETL, it opens Chromium and checks the Backoffice session. If login or OTP is required, complete it in the browser. Leave Chromium open; once an authenticated Dashboard opens, the script saves the session, closes Chromium, and starts ETL. If login cannot be completed, it shows an alert and makes no workbook changes. After a successful workbook commit, `main.py` rebuilds `05. Revenue_dashboard_Gateway.html` from the workbook. Other ETL or dashboard failures also create `ATTENTION - Revenue update failed.txt` with the error, run ID, and diagnostic paths. You can run the same sequence manually with:
+The scheduled task calls `scripts\run_daily_etl.bat`. Chromium opens Backoffice first and POS Payments second. Each source ETL is queued as soon as its login is confirmed, so one source can update while the other still needs login. Chromium closes as soon as both logins pass; the batch then finishes the queued ETLs one at a time. Each successful workbook refresh rebuilds its dashboard. Failures create `ATTENTION - Revenue update failed.txt` and are recorded in `data\logs\scheduler.log`. You can run the same sequence manually with:
 
 ```powershell
 scripts\run_daily_etl.bat
@@ -47,7 +47,7 @@ To verify that Windows popups are visible without running the ETL or changing th
 scripts\run_daily_etl.bat --test-alert
 ```
 
-The dashboard output and workbook are local generated/private files and are ignored by Git. The HTML template is `templates/05. Revenue_dashboard_Gateway.template.html`.
+The workbooks and dashboard outputs are local/private files and are ignored by Git. Sanitized dashboard templates are stored under `templates/`.
 
 ## Keep one runner per workbook
 

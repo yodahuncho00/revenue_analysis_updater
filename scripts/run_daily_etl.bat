@@ -8,7 +8,7 @@ if /I "%~1"=="--test-alert" goto test_alert
 echo [%DATE% %TIME%] Starting daily Revenue Analysis ETL run... >> data\logs\scheduler.log
 echo [%DATE% %TIME%] Project directory: %CD% >> data\logs\scheduler.log
 if exist data\logs\latest_run.txt del data\logs\latest_run.txt
-echo [%DATE% %TIME%] Checking Backoffice session before starting ETL... >> data\logs\scheduler.log
+echo [%DATE% %TIME%] Opening Backoffice and POS login tabs; each source runs after its login passes... >> data\logs\scheduler.log
 if not exist "%PYTHON%" (
   echo [%DATE% %TIME%] ERROR: Virtual-environment Python not found: %PYTHON% >> data\logs\scheduler.log
   set "PREFLIGHT_EXIT=3"
@@ -21,14 +21,13 @@ if not exist scripts\refresh_backoffice_session.py (
 )
 "%PYTHON%" scripts\refresh_backoffice_session.py --preflight >> data\logs\scheduler.log 2>&1
 set "PREFLIGHT_EXIT=%ERRORLEVEL%"
-if not "%PREFLIGHT_EXIT%"=="0" goto preflight_failed
-echo [%DATE% %TIME%] Backoffice session ready; starting ETL... >> data\logs\scheduler.log
-"%PYTHON%" main.py >> data\logs\scheduler.log 2>&1
-set "ETL_EXIT=%ERRORLEVEL%"
-if not "%ETL_EXIT%"=="0" (
-  set "FAILED_STAGE=Revenue pipeline (workbook update or dashboard refresh)"
+if not "%PREFLIGHT_EXIT%"=="0" (
+  set "ETL_EXIT=%PREFLIGHT_EXIT%"
+  set "FAILED_STAGE=One or more source pipelines failed; check which workbook/dashboard was updated"
   goto failed
 )
+echo [%DATE% %TIME%] Both sources completed after their respective logins... >> data\logs\scheduler.log
+set "ETL_EXIT=0"
 if exist "%ALERT_FILE%" del "%ALERT_FILE%"
 goto finished
 :failed
@@ -51,13 +50,13 @@ if exist data\logs\latest_run.txt set /p RUN_ID=<data\logs\latest_run.txt
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0show_failure_alert.ps1" -AlertFile "%ALERT_FILE%" -RunReport "%CD%\data\reports\%RUN_ID%.json"
 goto finished
 :preflight_failed
-echo [%DATE% %TIME%] FAILED during preflight; ETL was not started. Exit code %PREFLIGHT_EXIT%. >> data\logs\scheduler.log
+echo [%DATE% %TIME%] FAILED before both source pipelines completed. Exit code %PREFLIGHT_EXIT%. >> data\logs\scheduler.log
 (
-  echo PRE-FLIGHT FAILED - Revenue Analysis ETL was not started.
-  echo The Python environment, Backoffice session check, or login did not complete successfully.
-  echo No workbook changes were made by this scheduled run.
+  echo SOURCE RUN FAILED - Revenue Analysis daily run did not complete.
+  echo The Python environment or login orchestration did not complete successfully.
+  echo A source that passed login may already have completed its update.
   echo.
-  echo Check data\logs\scheduler.log for details. If login or OTP is required, complete it in the opened browser and rerun scripts\run_daily_etl.bat.
+  echo Check data\logs\scheduler.log for details. Complete both logins in Chromium and keep it open until both are confirmed.
 ) > "%ALERT_FILE%"
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0show_failure_alert.ps1" -AlertFile "%ALERT_FILE%"
 exit /b %PREFLIGHT_EXIT%

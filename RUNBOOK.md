@@ -1,7 +1,7 @@
 # Operations Runbook: Autonomous Revenue Analysis ETL Pipeline
 
 **System:** Revenue Analysis Daily Updater  
-**Primary Workbook:** `05. Revenue_analysis_Gateway.xlsx`
+**Workbooks:** `05. Revenue_analysis_Gateway.xlsx`, `05. Revenue_analysis_POS.xlsx`
 **Configuration:** `config.yaml`  
 **Timezone:** `UTC+3`
 
@@ -22,15 +22,15 @@ python -m playwright install chromium
 If PowerShell is currently in the `scripts` directory, use
 `python -m pip install -r ..\requirements.txt` instead.
 
-To install on another Windows computer, first copy the project and the authorized
-workbook there, then run this from PowerShell in the project folder:
+To install on another Windows computer, first copy the project and both authorized
+workbooks there, then run this from PowerShell in the project folder:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ```
 The installer creates a local `.venv`, installs the requirements and Chromium,
 and creates the data directories. It does not copy Backoffice login state. On the
-new computer, run `python scripts\refresh_backoffice_session.py` and complete that
-computer's login and OTP. After authentication, register the daily task with
+new computer, run `python scripts\refresh_backoffice_session.py` and complete both
+portal logins and OTPs in tab 1 (Backoffice) and tab 2 (POS). After authentication, register the daily task with
 `powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1`.
 Use one scheduled runner per shared workbook to prevent concurrent updates.
 
@@ -55,15 +55,15 @@ Do not use the fixture extractor for a production update.
 The live ETL and the refresh utility share a persistent Chromium profile under
 `%LOCALAPPDATA%\RevenueAnalysisUpdater\BackofficeProfile`. On first use, the
 existing `data/storage_state.json` is imported into that profile once. If
-Backoffice asks for login or OTP, refresh the profile interactively:
+either portal asks for login or OTP, refresh both sessions interactively:
 ```powershell
 python scripts\refresh_backoffice_session.py
 ```
-Complete login and OTP in the visible browser, then open the Backoffice Dashboard
-if login does not redirect there. Leave Chromium open; the script checks every
-open tab for the authenticated Dashboard route, saves the session, and closes
-Chromium itself. Run the ETL and refresh utility under the same
-Windows account, and do not run them concurrently because Chromium locks its profile.
+Complete login and OTP in both visible tabs. Tab 1 is Backoffice and tab 2 is POS
+Payments. During a daily run each source ETL is queued as soon as its login
+passes. Chromium closes as soon as both logins pass, then the batch finishes
+queued ETLs one at a time. Run the ETL and refresh utility under the same Windows
+account.
 Treat both the profile and `data/storage_state.json` as passwords: they contain
 authentication data and must not be shared or committed.
 
@@ -82,8 +82,9 @@ calculated balance values appear once per account group; provider liabilities
 are written against their individual provider IDs.
 
 ### 1.3 Normal Production Daily Run
-Runs the complete ETL pipeline, atomically commits updates to `05. Revenue_analysis_Gateway.xlsx`,
-then refreshes `05. Revenue_dashboard_Gateway.html` from the committed workbook:
+Runs both independent ETLs: Backoffice refreshes `05. Revenue_analysis_Gateway.xlsx`
+and its dashboard; POS Portal replaces all rows in `05. Revenue_analysis_POS.xlsx`
+and refreshes its dashboard:
 ```bash
 python main.py
 ```

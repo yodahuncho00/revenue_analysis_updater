@@ -11,6 +11,9 @@ paths:
   workbook_path: "05. Revenue_analysis_Gateway.xlsx"
   dashboard_path: "05. Revenue_dashboard_Gateway.html"
   dashboard_template_path: "templates/05. Revenue_dashboard_Gateway.template.html"
+  pos_workbook_path: "05. Revenue_analysis_POS.xlsx"
+  pos_dashboard_path: "05. Revenue_dashboard_POS.html"
+  pos_dashboard_template_path: "templates/05. Revenue_dashboard_POS.template.html"
   backup_dir: "data/backups"
   raw_dir: "data/raw"
   reports_dir: "data/reports"
@@ -29,6 +32,11 @@ backoffice:
     settlements: "https://backoffice.zoyktech.com/wl_partner/8/settlements?rowsPerPage=100"
     top_ups: "https://backoffice.zoyktech.com/wl_partner/8/top_ups?rowsPerPage=100"
   browser:
+    channel: "chrome"
+    args:
+      - "--disable-blink-features=AutomationControlled"
+    ignore_default_args:
+      - "--enable-automation"
     headless: true
     timeout_ms: 30000
     navigation_timeout_ms: 60000
@@ -37,6 +45,10 @@ backoffice:
     viewport:
       width: 1920
       height: 1080
+
+pos_portal:
+  payments_url: "https://pos-portal.unipesa.tech/payments"
+  download_timeout_ms: 120000
 
 tolerances:
   hierarchy_additive: 0.15

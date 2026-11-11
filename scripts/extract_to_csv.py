@@ -30,6 +30,7 @@ def main() -> int:
         override_date=args.date,
         step=args.step,
         extractor_type="playwright",
+        source="backoffice",
     )
 
 

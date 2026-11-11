@@ -8,7 +8,7 @@ import csv
 import io
 import calendar
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator
 from urllib.parse import parse_qs, urlparse
@@ -32,6 +32,13 @@ class PlaywrightExtractor(BaseExtractor):
         "Merchant",
         "Merchant Order Id",
         "Note",
+    )
+
+    POS_PAYMENT_COLUMNS = (
+        "Payment ID", "Datetime", "Type", "Amount", "Currency",
+        "Merchant fee", "Provider cost", "Partner net revenue", "Account",
+        "Receipt Name", "Agent", "Terminal", "Parent agent", "Provider",
+        "Status", "Customer fee", "Customer fee mode", "Agent rebate",
     )
 
     DASHBOARD_METRICS = (
@@ -66,6 +73,35 @@ class PlaywrightExtractor(BaseExtractor):
     def launch_persistent_context(
         self, playwright: Any, headless: Optional[bool] = None
     ) -> Any:
+        browser_cfg = self.bo_cfg.get("browser", {})
+        channel = browser_cfg.get("channel")
+        extra_args = browser_cfg.get("args")
+        ignore_default_args = browser_cfg.get("ignore_default_args")
+
+        run_state_path = os.environ.get("REVENUE_ETL_STORAGE_STATE")
+        if run_state_path and os.path.isfile(run_state_path):
+            launch_kwargs = {
+                "headless": browser_cfg.get("headless", True) if headless is None else headless,
+            }
+            if channel:
+                launch_kwargs["channel"] = channel
+            if extra_args:
+                launch_kwargs["args"] = list(extra_args)
+            if ignore_default_args:
+                launch_kwargs["ignore_default_args"] = list(ignore_default_args)
+            try:
+                browser = playwright.chromium.launch(**launch_kwargs)
+            except Exception:
+                launch_kwargs.pop("channel", None)
+                browser = playwright.chromium.launch(**launch_kwargs)
+
+            context = browser.new_context(
+                storage_state=run_state_path,
+                viewport=browser_cfg.get("viewport", {"width": 1280, "height": 720}),
+            )
+            context.on("close", lambda *_args: browser.close())
+            return context
+
         profile_path = Path(
             os.path.expandvars(os.path.expanduser(self.browser_profile_dir))
         )
@@ -76,12 +112,29 @@ class PlaywrightExtractor(BaseExtractor):
             )
         profile_path.mkdir(parents=True, exist_ok=True)
         marker_path = profile_path / ".storage_state_imported"
-        browser_cfg = self.bo_cfg.get("browser", {})
-        context = playwright.chromium.launch_persistent_context(
-            str(profile_path),
-            headless=browser_cfg.get("headless", True) if headless is None else headless,
-            viewport=browser_cfg.get("viewport", {"width": 1280, "height": 720}),
-        )
+
+        launch_kwargs = {
+            "headless": browser_cfg.get("headless", True) if headless is None else headless,
+            "viewport": browser_cfg.get("viewport", {"width": 1280, "height": 720}),
+        }
+        if channel:
+            launch_kwargs["channel"] = channel
+        if extra_args:
+            launch_kwargs["args"] = list(extra_args)
+        if ignore_default_args:
+            launch_kwargs["ignore_default_args"] = list(ignore_default_args)
+
+        try:
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_path),
+                **launch_kwargs,
+            )
+        except Exception:
+            launch_kwargs.pop("channel", None)
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_path),
+                **launch_kwargs,
+            )
         try:
             if not marker_path.exists() and os.path.isfile(self.storage_state_path):
                 with open(self.storage_state_path, "r", encoding="utf-8") as state_file:
@@ -114,24 +167,26 @@ class PlaywrightExtractor(BaseExtractor):
     def _assert_authenticated(page: Any) -> None:
         page_url = page.url
         path = urlparse(page_url).path
-        auth_inputs = page.locator(
-            'input[type="password"], input[autocomplete="one-time-code"], '
-            'input[name*="otp" i], input[name*="verification" i]'
-        )
-        for index in range(auth_inputs.count()):
-            if auth_inputs.nth(index).is_visible():
-                raise PlaywrightExtractionError(
-                    f"Backoffice is showing a login or verification form "
-                    f"(current page: {page_url}). Refresh the saved session with "
-                    "'python scripts\\refresh_backoffice_session.py', then retry."
-                )
+        if hasattr(page, "locator"):
+            auth_inputs = page.locator(
+                'input[type="password"], input[autocomplete="one-time-code"], '
+                'input[name*="otp" i], input[name*="verification" i]'
+            )
+            for index in range(auth_inputs.count()):
+                if auth_inputs.nth(index).is_visible():
+                    raise PlaywrightExtractionError(
+                        f"Backoffice is showing a login or verification form "
+                        f"(current page: {page_url}). Refresh the saved session with "
+                        "'python scripts\\refresh_backoffice_session.py', then retry."
+                    )
 
         if re.search(r"/(login|sign[-_]?in|auth|otp|verification)(/|$)", path, re.IGNORECASE):
-            signed_in_marker = page.get_by_role(
-                "button", name=re.compile(r"^Sign out$", re.IGNORECASE)
-            )
-            if signed_in_marker.count() and signed_in_marker.first.is_visible():
-                return
+            if hasattr(page, "get_by_role"):
+                signed_in_marker = page.get_by_role(
+                    "button", name=re.compile(r"^Sign out$", re.IGNORECASE)
+                )
+                if signed_in_marker.count() and signed_in_marker.first.is_visible():
+                    return
             raise PlaywrightExtractionError(
                 f"Backoffice authentication is required (current page: {page_url}). "
                 "Refresh the saved session with "
@@ -192,6 +247,45 @@ class PlaywrightExtractor(BaseExtractor):
         return (
             f"visible inputs={inputs!r}; visible buttons={buttons!r}; "
             f"open picker text={popup_text!r}"
+        )
+
+    @staticmethod
+    def _set_date_range_text_inputs(
+        page: Any, from_value: str, to_value: str, page_name: str
+    ) -> None:
+        """Set both reactive Quasar date fields in one DOM turn to avoid rerenders."""
+        from_input = page.get_by_role("textbox", name="From", exact=True)
+        to_input = page.get_by_role("textbox", name="To", exact=True)
+        if from_input.count() != 1 or to_input.count() != 1:
+            raise PlaywrightExtractionError(
+                f"{page_name} date menu did not expose exactly one From and To field. "
+                f"{PlaywrightExtractor._date_picker_diagnostics(page)}"
+            )
+        from_input.wait_for(state="visible", timeout=10000)
+        to_input.wait_for(state="visible", timeout=10000)
+        page.evaluate(
+            """({fromValue, toValue}) => {
+                const visibleByLabel = label => Array.from(
+                    document.querySelectorAll("input[aria-label]")
+                ).filter(input => input.getAttribute("aria-label") === label
+                    && input.getClientRects().length > 0);
+                const from = visibleByLabel("From");
+                const to = visibleByLabel("To");
+                if (from.length !== 1 || to.length !== 1) {
+                    throw new Error("Visible From/To date inputs changed while opening the menu.");
+                }
+                const setValue = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype, "value"
+                ).set;
+                setValue.call(from[0], fromValue);
+                setValue.call(to[0], toValue);
+                for (const input of [from[0], to[0]]) {
+                    input.dispatchEvent(new Event("input", {bubbles: true}));
+                    input.dispatchEvent(new Event("change", {bubbles: true}));
+                }
+                return [from[0].value, to[0].value];
+            }""",
+            {"fromValue": from_value, "toValue": to_value},
         )
 
     @staticmethod
@@ -341,7 +435,7 @@ class PlaywrightExtractor(BaseExtractor):
         raw_path = os.path.join(self.raw_storage_dir, f"{name}.json")
         meta_path = os.path.join(self.raw_storage_dir, f"{name}_meta.json")
 
-        content = json.dumps(data, indent=2, ensure_ascii=False)
+        content = json.dumps(data, indent=2, ensure_ascii=False, default=str)
         sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
         with open(raw_path, "w", encoding="utf-8") as f:
@@ -1011,6 +1105,158 @@ class PlaywrightExtractor(BaseExtractor):
     def extract_topups(self, from_date: date, to_date: date) -> List[Dict[str, Any]]:
         return self._extract_transactions("top_ups", from_date, to_date, "topups")
 
+    def extract_pos_payments(self) -> List[List[Any]]:
+        """Download the full POS Payments CSV and sort it for BO_extract."""
+        from playwright.sync_api import sync_playwright
+
+        pos_cfg = self.config.get("pos_portal", {})
+        url = pos_cfg.get("payments_url", "https://pos-portal.unipesa.tech/payments")
+        browser_cfg = pos_cfg.get("browser", self.bo_cfg.get("browser", {}))
+        timeout = browser_cfg.get("navigation_timeout_ms", 60000)
+        content = None
+        with sync_playwright() as playwright:
+            context = self.launch_persistent_context(playwright)
+            try:
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+                self._assert_pos_authenticated(page)
+
+                # Locate and click 'All time' filter
+                all_time = page.get_by_role("button", name=re.compile(r"All\s*time", re.I)).first
+                if not all_time.is_visible():
+                    all_time = page.locator("button, [role='button'], [role='tab'], a").filter(
+                        has_text=re.compile(r"^All\s*time$", re.I)
+                    ).first
+                all_time.wait_for(state="visible", timeout=browser_cfg.get("timeout_ms", 30000))
+                if "period=all" not in page.url:
+                    all_time.click()
+                try:
+                    page.wait_for_function(
+                        "new URL(location.href).searchParams.get('period') === 'all'",
+                        timeout=5000,
+                    )
+                except Exception:
+                    pass
+
+                # Locate and click 'Save CSV' button
+                save_csv = page.get_by_role("button", name=re.compile(r"Save\s*CSV", re.I)).first
+                if not save_csv.is_visible():
+                    save_csv = page.locator("button, [role='button'], a").filter(
+                        has_text=re.compile(r"Save\s*CSV", re.I)
+                    ).first
+                save_csv.wait_for(state="visible", timeout=browser_cfg.get("timeout_ms", 30000))
+                with page.expect_download(timeout=pos_cfg.get("download_timeout_ms", 120000)) as info:
+                    save_csv.click()
+                downloaded = info.value.path()
+                if not downloaded:
+                    raise PlaywrightExtractionError("POS Payments CSV download did not produce a file.")
+                content = Path(downloaded).read_bytes()
+                source_url = page.url
+            finally:
+                context.close()
+
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise PlaywrightExtractionError("POS Payments CSV is not valid UTF-8.") from exc
+        reader = csv.DictReader(io.StringIO(text, newline=""))
+        headers = tuple(h.strip() for h in (reader.fieldnames or ()))
+        if headers != self.POS_PAYMENT_COLUMNS:
+            raise PlaywrightExtractionError(
+                "POS Payments CSV headers do not match BO_extract!A:R. "
+                f"Expected {self.POS_PAYMENT_COLUMNS!r}; received {headers!r}."
+            )
+
+        parsed = []
+        for line_number, record in enumerate(reader, start=2):
+            if None in record:
+                raise PlaywrightExtractionError(
+                    f"POS Payments CSV row {line_number} has unexpected extra fields."
+                )
+            values = [record[column] for column in self.POS_PAYMENT_COLUMNS]
+            if any(value is None for value in values):
+                raise PlaywrightExtractionError(
+                    f"POS Payments CSV row {line_number} has missing fields."
+                )
+
+            # Parse datetime
+            dt_str = values[1].strip()
+            created = None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+                try:
+                    created = datetime.strptime(dt_str, fmt)
+                    break
+                except ValueError:
+                    pass
+            if created is None:
+                try:
+                    created = datetime.fromisoformat(dt_str.replace("Z", ""))
+                except Exception as exc:
+                    raise PlaywrightExtractionError(
+                        f"POS Payments CSV row {line_number} has an invalid Datetime: {dt_str!r}."
+                    ) from exc
+
+            # Parse Payment ID
+            try:
+                payment_id = int(values[0].strip().lstrip("#"))
+            except (ValueError, TypeError) as exc:
+                raise PlaywrightExtractionError(
+                    f"POS Payments CSV row {line_number} has an invalid Payment ID: {values[0]!r}."
+                ) from exc
+
+            typed = []
+            for index, value in enumerate(values):
+                raw_value = value
+                value = value.strip() if isinstance(value, str) else value
+                if not value or value in ("-", "n/a", "N/A", "null", "None"):
+                    typed.append(None)
+                elif index == 0:
+                    typed.append(payment_id)
+                elif index == 1:
+                    typed.append(created)
+                elif index == 8 and isinstance(value, str) and value.isdigit():
+                    typed.append(int(value))
+                elif index in (3, 5, 6, 7, 15, 17):
+                    try:
+                        num = float(str(value).replace(",", ""))
+                        typed.append(int(num) if num.is_integer() else num)
+                    except ValueError as exc:
+                        raise PlaywrightExtractionError(
+                            f"POS Payments CSV row {line_number} has a nonnumeric "
+                            f"{self.POS_PAYMENT_COLUMNS[index]} value: {value!r}."
+                        ) from exc
+                else:
+                    typed.append(raw_value)
+            parsed.append((created.year, created.month, payment_id, typed))
+
+        parsed.sort(key=lambda item: (item[0], item[1], item[2]))
+        rows = [item[3] for item in parsed]
+        if not rows:
+            raise PlaywrightExtractionError("POS Payments CSV contains no payment rows.")
+        self._save_raw("pos_payments", rows, {
+            "url": source_url,
+            "row_count": len(rows),
+            "sort": "calendar month ascending, Payment ID ascending",
+        })
+        return rows
+
+    @staticmethod
+    def _assert_pos_authenticated(page: Any, timeout_ms: int = 30000) -> None:
+        try:
+            if urlparse(page.url).hostname != "pos-portal.unipesa.tech":
+                raise PlaywrightExtractionError("The POS Portal redirected away from Payments.")
+            save_csv = page.get_by_role("button", name=re.compile(r"Save\s*CSV", re.I)).first
+            if not save_csv.is_visible():
+                save_csv = page.locator("button, [role='button'], a").filter(
+                    has_text=re.compile(r"Save\s*CSV", re.I)
+                ).first
+            save_csv.wait_for(state="visible", timeout=timeout_ms)
+        except Exception as exc:
+            raise PlaywrightExtractionError(
+                "POS Portal login was not confirmed: Payments/Save CSV did not load. "
+                f"Current page: {page.url}."
+            ) from exc
+
     def _extract_transactions(
         self,
         route_name: str,
@@ -1049,15 +1295,9 @@ class PlaywrightExtractor(BaseExtractor):
                     "button", name=re.compile(r"^Date\b", re.IGNORECASE)
                 ).first
                 date_filter.click()
-                from_input = page.get_by_role("textbox", name="From", exact=True)
-                to_input = page.get_by_role("textbox", name="To", exact=True)
-                if from_input.count() != 1 or to_input.count() != 1:
-                    raise PlaywrightExtractionError(
-                        f"{capture_name.title()} date menu did not expose exactly one "
-                        f"From and To field. {self._date_picker_diagnostics(page)}"
-                    )
-                from_input.fill(from_str)
-                to_input.fill(to_str)
+                self._set_date_range_text_inputs(
+                    page, from_str, to_str, capture_name.title()
+                )
                 timeout = self.bo_cfg.get("browser", {}).get(
                     "transaction_response_timeout_ms", 120000
                 )

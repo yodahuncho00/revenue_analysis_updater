@@ -92,7 +92,7 @@ def load_config(config_path: str = "config.yaml") -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-def run_pipeline(
+def _run_backoffice_pipeline(
     config_path: str = "config.yaml",
     dry_run: bool = False,
     override_date: str = None,
@@ -496,6 +496,59 @@ def run_pipeline(
         )
         return 1
 
+
+def run_pipeline(
+    config_path: str = "config.yaml",
+    dry_run: bool = False,
+    override_date: str = None,
+    step: str = None,
+    extractor_type: str = "playwright",
+    source: str = "both",
+) -> int:
+    """Run Backoffice and POS refreshes independently during a full ETL run."""
+    if source not in {"both", "backoffice", "pos"}:
+        raise ValueError("source must be 'both', 'backoffice', or 'pos'.")
+    if source == "pos":
+        if step is not None:
+            raise ValueError("A Gateway --step cannot be combined with source='pos'.")
+        config = load_config(config_path)
+        from pos_pipeline import run_pos_pipeline
+
+        try:
+            run_pos_pipeline(config, dry_run=dry_run)
+            return 0
+        except Exception:
+            return 1
+    if source == "backoffice":
+        return _run_backoffice_pipeline(
+            config_path=config_path,
+            dry_run=dry_run,
+            override_date=override_date,
+            step=step,
+            extractor_type=extractor_type,
+        )
+
+    backoffice_result = _run_backoffice_pipeline(
+        config_path=config_path,
+        dry_run=dry_run,
+        override_date=override_date,
+        step=step,
+        extractor_type=extractor_type,
+    )
+    if step is not None or extractor_type != "playwright":
+        return backoffice_result
+
+    try:
+        config = load_config(config_path)
+        from pos_pipeline import run_pos_pipeline
+
+        pos_result = run_pos_pipeline(config, dry_run=dry_run)
+    except Exception:
+        pos_result = None
+    if pos_result is None:
+        return 1
+    return 0 if backoffice_result == 0 else 1
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Autonomous Daily Revenue Analysis ETL Job")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
@@ -512,6 +565,12 @@ if __name__ == "__main__":
         choices=["fixture", "playwright"],
         help="Extractor type (fixture is intended for tests)",
     )
+    parser.add_argument(
+        "--source",
+        choices=["both", "backoffice", "pos"],
+        default="both",
+        help="Run both independent pipelines or only one source.",
+    )
 
     args = parser.parse_args()
     code = run_pipeline(
@@ -519,6 +578,7 @@ if __name__ == "__main__":
         dry_run=args.dry_run,
         override_date=args.date,
         step=args.step,
-        extractor_type=args.extractor
+        extractor_type=args.extractor,
+        source=args.source,
     )
     sys.exit(code)

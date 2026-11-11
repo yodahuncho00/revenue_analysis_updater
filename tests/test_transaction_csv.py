@@ -182,7 +182,7 @@ def test_transaction_detail_backfill_only_fills_empty_j_and_k(tmp_path, sheet_na
              "note": "downloaded-note-2"},
         ])
 
-        assert updated == {"merchant_order_id": 1, "note": 2}
+        assert updated == {"merchant_order_id": 1, "note": 2, "country": 0, "status": 0}
         assert writer.wb[sheet_name]["J2"].value == "downloaded-order"
         assert writer.wb[sheet_name]["K2"].value == "downloaded-note"
         assert writer.wb[sheet_name]["J3"].value == "existing-order"

@@ -50,11 +50,16 @@ $DashboardTemplate = Join-Path $ProjectDir "templates\05. Revenue_dashboard_Gate
 if (-not (Test-Path -LiteralPath $DashboardOutput)) {
     Copy-Item -LiteralPath $DashboardTemplate -Destination $DashboardOutput
 }
+$PosDashboardOutput = Join-Path $ProjectDir "05. Revenue_dashboard_POS.html"
+$PosDashboardTemplate = Join-Path $ProjectDir "templates\05. Revenue_dashboard_POS.template.html"
+if (-not (Test-Path -LiteralPath $PosDashboardOutput)) {
+    Copy-Item -LiteralPath $PosDashboardTemplate -Destination $PosDashboardOutput
+}
 
 Write-Host "Dependencies installed in $VenvPython"
-Write-Host "Next, authenticate this computer's own Backoffice session:"
+Write-Host "Next, authenticate this computer's own Backoffice and POS Portal sessions:"
 Write-Host "  $VenvPython scripts\refresh_backoffice_session.py"
-Write-Host "Complete login and OTP in the browser. Do not copy another user's storage_state.json or browser profile."
+Write-Host "Complete login and OTP in both tabs. Do not copy another user's storage_state.json or browser profile."
 
 if ($RegisterDailyTask) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "setup_task_scheduler.ps1")

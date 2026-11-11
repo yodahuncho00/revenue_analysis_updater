@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zoyk POS Dashboard</title>
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --card:#ffffff; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,0.10); --wash:rgba(42,120,214,0.08);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6; --s8:#e34948;
+  --good:#0ca30c; --goodText:#006300; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b; --total:#52514e;
+  --seq1:#cde2fb; --seq7:#0d366b; --input:#fff8e1;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --card:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10); --wash:rgba(57,135,229,0.12);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+    --goodText:#0ca30c; --total:#898781; --seq1:#1c2c40; --seq7:#86b6ef; --input:#2a2618;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#0d0d0d; --surface:#1a1a19; --card:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10); --wash:rgba(57,135,229,0.12);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --goodText:#0ca30c; --total:#898781; --seq1:#1c2c40; --seq7:#86b6ef; --input:#2a2618;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:18px 24px 6px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-end}
+h1{font-size:22px;margin:0;font-weight:650}
+.sub{color:var(--ink2);font-size:13px}
+.content{min-width:0}
+.layout{display:grid;grid-template-columns:212px minmax(0,1fr);min-height:100vh}
+aside{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--card);border-right:1px solid var(--ring);padding:18px 12px;display:flex;flex-direction:column;gap:14px;z-index:30}
+aside .brand{font-weight:700;font-size:15px;padding:0 8px;white-space:nowrap}
+aside .brand small{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:2px}
+nav{display:flex;flex-direction:column;gap:2px}
+nav a{color:var(--ink2);text-decoration:none;padding:8px 10px;font-size:13.5px;border-radius:6px;border-left:3px solid transparent;display:flex;align-items:center;gap:8px}
+nav a:hover{background:var(--wash)}
+nav a .n{color:var(--muted);font-size:11px;width:16px}
+nav a.on{color:var(--ink);background:var(--wash);border-left-color:var(--s1);font-weight:600}
+aside .side-foot{margin-top:auto;font-size:12px;color:var(--muted);padding:0 8px}
+.filters{position:sticky;top:0;z-index:19;background:var(--page);padding:10px 24px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;border-bottom:1px solid var(--grid)}
+.f{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);text-transform:none}
+.f select,.f input{font:13px system-ui,-apple-system,"Segoe UI",sans-serif;padding:5px 8px;border:1px solid var(--axis);border-radius:6px;background:var(--card);color:var(--ink);min-width:120px}
+.f input[type=date]{min-width:130px}
+#filters select{max-width:190px}
+.btn{font:13px system-ui;padding:6px 10px;border:1px solid var(--axis);border-radius:6px;background:var(--card);color:var(--ink);cursor:pointer}
+.btn:hover{background:var(--wash)}
+.seg{display:inline-flex;border:1px solid var(--axis);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:var(--card);color:var(--ink2);padding:5px 10px;font:13px system-ui;cursor:pointer}
+.seg button.on{background:var(--s1);color:#fff}
+main{padding:8px 24px 48px;max-width:1500px;margin:0 auto}
+section{display:none;padding-top:14px}
+section.on{display:block}
+.ctx{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--ink2)}
+.chip{background:var(--card);border:1px solid var(--axis);border-radius:999px;padding:2px 4px 2px 10px;display:inline-flex;gap:4px;align-items:center}
+.chip button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 4px}
+.chip button:hover{color:var(--crit)}
+section>h2{font-size:17px;margin:8px 0 4px;font-weight:650}
+section>.lead{color:var(--ink2);font-size:13px;margin:0 0 12px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.card{background:var(--card);border:1px solid var(--ring);border-radius:10px;padding:14px 16px;min-width:0}
+.card h3{font-size:14px;margin:0 0 2px;font-weight:600}
+.card .note{color:var(--muted);font-size:12px;margin:0 0 8px}
+.tile .lab{color:var(--ink2);font-size:12px}
+.tile .val{font-size:22px;font-weight:600;margin-top:2px;white-space:nowrap}
+.tile .dl{font-size:12px;margin-top:2px}
+.hero .val{font-size:44px}
+.up{color:var(--goodText)} .down{color:var(--crit)} .flat{color:var(--muted)}
+.chart{position:relative;width:100%}
+svg text{fill:var(--muted);font:11px system-ui,-apple-system,"Segoe UI",sans-serif}
+svg .lbl{fill:var(--ink2);font-size:11px}
+svg .lblb{fill:var(--ink);font-weight:600;font-size:11px}
+.tt{position:fixed;pointer-events:none;background:var(--card);border:1px solid var(--ring);box-shadow:0 4px 16px rgba(0,0,0,.12);border-radius:8px;padding:8px 10px;font-size:12px;z-index:50;display:none;max-width:280px}
+.tt .v{font-weight:650;font-size:13px;color:var(--ink)} .tt .k{color:var(--ink2)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+th{color:var(--ink2);font-weight:600;cursor:pointer;position:sticky;top:0;background:var(--card)}
+th:first-child,td:first-child{text-align:left}
+td{font-variant-numeric:tabular-nums}
+tr.tot td{font-weight:650;border-top:1px solid var(--axis)}
+tbody tr:hover td{background:var(--wash)}
+.scroll{max-height:440px;overflow:auto}
+.card>div:not(.chart):not(.tiles){overflow-x:auto}
+.txt td{text-align:left;white-space:normal}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2);margin:4px 0 6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.tv{font-size:12px;color:var(--s1);cursor:pointer;background:none;border:0;padding:0;margin-left:auto}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.pill.g{background:rgba(12,163,12,.12);color:var(--goodText)} .pill.w{background:rgba(250,178,25,.18);color:var(--ink)} .pill.c{background:rgba(208,59,59,.12);color:var(--crit)} .pill.n{background:var(--grid);color:var(--ink2)}
+.calc label{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:13px;padding:4px 0;border-bottom:1px solid var(--grid)}
+.calc input,.calc select{width:120px;font:13px system-ui;padding:4px 6px;border:1px solid var(--axis);border-radius:5px;background:var(--input);color:var(--ink);text-align:right}
+.calc select{text-align:left;width:190px}
+.calc h4{margin:12px 0 4px;font-size:13px;color:var(--ink2);font-weight:600}
+.warnbox{border-left:3px solid var(--warn);padding:8px 12px;background:var(--card);border-radius:6px;font-size:13px;margin:6px 0}
+.okbox{border-left:3px solid var(--good)}
+footer{color:var(--muted);font-size:12px;padding:20px 24px}
+@media print{.filters,aside{position:static}}
+@media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}aside{position:sticky;height:auto;flex-direction:row;align-items:center;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--ring)}nav{flex-direction:row}nav a{white-space:nowrap;border-left:0;border-bottom:3px solid transparent;border-radius:0}nav a.on{border-bottom-color:var(--s1)}aside .side-foot,aside .brand small{display:none}.filters{position:static}}
+</style>
+</head>
+<body>
+<div class="layout">
+<aside>
+  <div class="brand">Zoyk Pay POS<small>Revenue dashboard</small></div>
+  <nav id="nav">
+    <a href="#overview" class="on"><span class="n">1</span>Overview</a>
+    <a href="#trends"><span class="n">2</span>Trends</a>
+    <a href="#bridges"><span class="n">3</span>Bridges</a>
+    <a href="#merchants"><span class="n">4</span>Merchants</a>
+    <a href="#mix"><span class="n">5</span>Mix</a>
+    <a href="#cohorts"><span class="n">6</span>Cohorts</a>
+    <a href="#customers"><span class="n">7</span>Customers</a>
+    <a href="#operations"><span class="n">8</span>Operations</a>
+    <a href="#calculator"><span class="n">9</span>Fee calculator</a>
+    <a href="#data"><span class="n">10</span>Data &amp; notes</a>
+  </nav>
+  <div class="side-foot"><div style="margin-bottom:6px">Theme</div><div class="seg" id="theme"><button data-v="auto" class="on">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div><div id="sideAsOf" style="margin-top:10px"></div></div>
+</aside>
+<div class="content">
+<header>
+  <div>
+    <h1>Zoyk Pay POS - revenue dashboard</h1>
+    <div class="sub" id="subtitle"></div>
+  </div>
+</header>
+<div class="filters" id="filters">
+  <div class="f">Period<select id="fPreset"></select></div>
+  <div class="f">From<input type="date" id="fFrom"></div>
+  <div class="f">To<input type="date" id="fTo"></div>
+  <div class="f">Compare with<select id="fCmp"></select></div>
+  <div class="f">Compare from<input type="date" id="fCFrom"></div>
+  <div class="f">Compare to<input type="date" id="fCTo"></div>
+  <div class="f">Currency<div class="seg" id="fCcy"><button data-v="ZMW" class="on">ZMW</button><button data-v="USD">USD</button></div></div>
+  <div class="f">Parent merchant<select id="fParent"></select></div>
+  <div class="f">Merchant<select id="fMerchant"></select></div>
+  <div class="f">Terminal<select id="fTerminal"></select></div>
+  <div class="f">Merchant type<select id="fType"></select></div>
+  <div class="f">Provider<select id="fProv"></select></div>
+  <div class="f">Payment method<select id="fMethod"></select></div>
+  <button class="btn" id="fReset">Reset filters</button>
+  <div class="ctx" id="ctx"></div>
+</div>
+<main>
+<section id="overview">
+  <h2>Overview</h2>
+  <p class="lead" id="ovLead"></p>
+  <div class="tiles" id="tiles"></div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>Period in numbers</h3><p class="note" id="pinNote"></p><div id="pin"></div></div>
+    <div class="card"><h3>Net revenue waterfall - from fees paid to partner net revenue</h3><p class="note">Selected period. Merchant fees + customer fees, less provider cost and agent rebate.</p><div class="chart" id="cFeeWf"></div></div>
+  </div>
+</section>
+
+<section id="trends">
+  <h2>Trends</h2>
+  <p class="lead">Full history for the filtered scope; the selected period is shaded. Each measure has its own chart (no dual axes).</p>
+  <div class="row"><span class="sub">Granularity</span><div class="seg" id="gran"><button data-v="day">Day</button><button data-v="week" class="on">Week</button><button data-v="month">Month</button></div></div>
+  <div class="grid g2">
+    <div class="card"><h3>TPV - successful customer payments</h3><div class="chart" id="cTpv"></div></div>
+    <div class="card"><h3>Partner net revenue</h3><div class="chart" id="cNet"></div></div>
+    <div class="card"><h3>Payments accepted</h3><div class="chart" id="cPay"></div></div>
+    <div class="card"><h3>Success rate - share of attempts that complete</h3><div class="chart" id="cSucc"></div></div>
+    <div class="card"><h3>Active terminals</h3><div class="chart" id="cTer"></div></div>
+    <div class="card"><h3>Take rate (net revenue / TPV)</h3><div class="chart" id="cTake"></div></div>
+  </div>
+</section>
+
+<section id="bridges">
+  <h2>Bridges</h2>
+  <p class="lead">How the comparison period became the selected period. Green = increase, red = decrease, grey = period totals.</p>
+  <div class="row">
+    <div class="f">Bridge<select id="bType">
+      <option value="pv">Price-volume drivers (net revenue)</option>
+      <option value="tpvdrv">TPV drivers (terminals x productivity x ticket)</option>
+      <option value="move">Merchant movement (new / reactivated / existing / lost)</option>
+      <option value="p">By parent merchant</option><option value="m">By merchant</option><option value="tr">By terminal</option>
+      <option value="vin">By merchant vintage</option><option value="me">By payment method</option><option value="pr">By provider</option>
+      <option value="mt">By merchant type</option></select></div>
+    <div class="f">Metric<select id="bMetric"><option value="n">Net revenue</option><option value="tpv">TPV</option></select></div>
+  </div>
+  <div class="card"><h3 id="bTitle"></h3><p class="note" id="bNote"></p><div class="chart" id="cBridge"></div><button class="tv" data-t="cBridge">Show table</button><div id="cBridge_t"></div></div>
+</section>
+
+<section id="merchants">
+  <h2>Merchants - parent, merchant and terminal</h2>
+  <p class="lead">Selected period vs comparison. Click a row to filter the whole dashboard to it.</p>
+  <div class="row"><div class="f">Level<select id="mLevel"><option value="p">Parent merchant</option><option value="m" selected>Merchant</option><option value="tr">Terminal</option></select></div>
+  <div class="f">Rank by<select id="mRank"><option value="n">Net revenue</option><option value="tpv">TPV</option><option value="cnt">Payments</option></select></div></div>
+  <div class="grid g2">
+    <div class="card"><h3 id="topTitle">Top 10</h3><div class="chart" id="cTop"></div></div>
+    <div class="card"><h3>Concentration</h3><p class="note">Share of the selected period's ranking measure held by the largest names.</p><div class="tiles" id="conc"></div><div class="chart" id="cPareto" style="margin-top:8px"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3 id="mtTitle">Merchant table</h3><div class="scroll" id="mTable"></div></div>
+</section>
+
+<section id="mix">
+  <h2>Mix</h2>
+  <p class="lead">Composition of the selected period, with the change vs the comparison period.</p>
+  <div class="row"><div class="f">Mix by<select id="xBy"><option value="me">Payment method</option><option value="pr">Provider</option><option value="ch">Payment channel</option><option value="mt">Merchant type</option><option value="pt">Parent type</option></select></div></div>
+  <div class="grid g2">
+    <div class="card"><h3>TPV share</h3><div class="chart" id="cMixTpv"></div></div>
+    <div class="card"><h3>Net revenue and take rate</h3><div class="chart" id="cMixNet"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Mix table</h3><div id="mixTable"></div></div>
+  <div class="card" style="margin-top:14px"><h3>Monthly TPV by mix item</h3><p class="note">Stacked by item; legend shows identity.</p><div class="chart" id="cMixTrend"></div></div>
+</section>
+
+<section id="cohorts">
+  <h2>Cohorts</h2>
+  <p class="lead">Cohorts use full history for the filtered scope (the period filter does not apply). M+0 = launch month, partial for the current month.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Merchant retention - % of each launch cohort still transacting</h3><div class="chart" id="cRetM"></div></div>
+    <div class="card"><h3>TPV retention - cohort TPV vs its launch month</h3><div class="chart" id="cRetT"></div></div>
+    <div class="card"><h3>TPV by merchant vintage (layer cake)</h3><div class="chart" id="cLayer"></div></div>
+    <div class="card"><h3>Merchant ramp - average per launched merchant by month of life</h3><div id="ramp"></div></div>
+  </div>
+</section>
+
+<section id="customers">
+  <h2>Customers</h2>
+  <p class="lead">A customer is a paying wallet (last 9 digits of the Backoffice account). Successful payments only.</p>
+  <div class="tiles" id="custTiles"></div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>New vs returning payers by month</h3><div class="chart" id="cCustNR"></div></div>
+    <div class="card"><h3>Payment frequency - payers by number of payments in the period</h3><div class="chart" id="cFreq"></div></div>
+    <div class="card"><h3>Customer retention - % of first-time payers who pay again</h3><div class="chart" id="cRetC"></div></div>
+    <div class="card"><h3>Top customers by TPV</h3><div class="scroll" id="custTop"></div></div>
+  </div>
+</section>
+
+<section id="operations">
+  <h2>Operations</h2>
+  <p class="lead">Success and failure, timing, ticket sizes and terminal health for the selected period.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Success rate by</h3><div class="row"><div class="seg" id="sBy"><button data-v="pr" class="on">Provider</button><button data-v="me">Method</button><button data-v="ch">Channel</button><button data-v="m">Merchant</button></div></div><div class="chart" id="cSuccBy"></div></div>
+    <div class="card"><h3>Failure reasons (rejected attempts)</h3><div class="chart" id="cReasons"></div></div>
+    <div class="card"><h3>When customers pay - hour x weekday</h3><div class="row"><div class="seg" id="hMetric"><button data-v="cnt" class="on">Payments</button><button data-v="tpv">TPV</button></div></div><div class="chart" id="cHeat"></div></div>
+    <div class="card"><h3>Ticket size distribution (ZMW per payment)</h3><div class="chart" id="cTicket"></div><div id="ticketTable"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Terminal health</h3><p class="note" id="healthNote"></p><div class="tiles" id="healthTiles"></div><div class="scroll" id="healthTable" style="margin-top:10px"></div></div>
+</section>
+
+<section id="calculator">
+  <h2>Fee calculator</h2>
+  <p class="lead">Price a new or existing POS merchant. Yellow fields are inputs; provider costs default to the contract rates on Channel_master. Amounts in ZMW per month.</p>
+  <div class="grid g3 calc">
+    <div class="card">
+      <h3>Merchant profile</h3>
+      <label>Merchant type<select id="kType"></select></label>
+      <label>Expected monthly TPV<input id="kTpv" type="number" value="100000" step="1000"></label>
+      <label>Average ticket<input id="kTicket" type="number" value="250" step="5"></label>
+      <label>Terminals<input id="kTerm" type="number" value="2" step="1"></label>
+      <label>Expected success rate<input id="kSucc" type="number" value="72" step="1"></label>
+      <h4>Payment mix</h4>
+      <label>QR share %<input id="kQr" type="number" value="30" step="5"></label>
+      <label>Push (USSD) share %<input id="kPush" type="number" value="70" disabled></label>
+      <label>Airtel share %<input id="kAir" type="number" value="85" step="5"></label>
+      <label>MTN share %<input id="kMtn" type="number" value="13" step="1"></label>
+      <label>Zamtel share %<input id="kZam" type="number" value="2" disabled></label>
+      <button class="btn" id="kBench" style="margin-top:8px">Fill ticket, success rate and mix from actuals</button>
+    </div>
+    <div class="card">
+      <h3>Pricing</h3>
+      <label>Customer fee % (on top)<input id="kFee" type="number" value="2.4" step="0.1"></label>
+      <label>Merchant fee %<input id="kMf" type="number" value="0" step="0.1"></label>
+      <label>Agent rebate %<input id="kBonus" type="number" value="1.0" step="0.1"></label>
+      <h4>Withdrawals</h4>
+      <label>Withdrawals per month<input id="kWn" type="number" value="8" step="1"></label>
+      <label>Average withdrawal<input id="kWa" type="number" value="1500" step="100"></label>
+      <label>Withdrawal fee %<input id="kWf" type="number" value="0" step="0.1"></label>
+      <label>Agent rebate on withdrawals %<input id="kWb" type="number" value="0" step="0.1"></label>
+      <h4>Provider cost per transaction (ZMW)</h4>
+      <div id="kCosts"></div>
+    </div>
+    <div class="card">
+      <h3>Monthly P&amp;L for the merchant</h3>
+      <div id="kPl"></div>
+      <div id="kBe" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h3>Sensitivity - take rate by total fee % (rows) and agent rebate % (columns)</h3><p class="note">At the ticket and mix above. Darker = higher take rate; negative cells are loss-making.</p><div id="kSens"></div></div>
+    <div class="card"><h3>Net revenue per payment by ticket size</h3><p class="note">Fixed provider cost per transaction makes small tickets unprofitable.</p><div class="chart" id="cKTicket"></div></div>
+    <div class="card"><h3>Benchmarks from actuals - last 90 days</h3><div id="kBenchT"></div></div>
+  </div>
+</section>
+
+<section id="data">
+  <h2>Data &amp; notes</h2>
+  <div class="grid g2">
+    <div class="card"><h3>Data quality</h3><div id="dq"></div></div>
+    <div class="card"><h3>Definitions</h3><div id="defs"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>FX rates used for conversion</h3><p class="note" id="fxNote"></p><div class="scroll" id="fxTable"></div></div>
+</section>
+</main>
+<footer id="foot"></footer>
+</div>
+</div>
+<div class="tt" id="tt"></div>
+<script id="rawdata" type="application/json">{"tx":{"n":0,"cols":{},"dicts":{}},"fxall":{},"fxclose":{},"rc":"ZMW","chans":[],"meta":{"zoyk":1},"types":[],"bands":[]}</script>
+<script>
+"use strict";
+const RAW = JSON.parse(document.getElementById("rawdata").textContent);
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, txt) => { const e = document.createElement(tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt != null) e.textContent = txt; return e; };
+const NS = 'http://www.w3.org/2000/svg';
+const sv = (tag, attrs = {}) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const SER = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
+
+// ------------------------------------------------------------------ data
+const T = RAW.tx, D = T.dicts, Cc = T.cols;
+const TX = [];
+for (let i = 0; i < T.n; i++) {
+  const r = {}; for (const k in Cc) r[k] = (k in D) ? D[k][Cc[k][i]] : Cc[k][i];
+  r.date = r.t.slice(0, 10); r.mi = (+r.t.slice(0, 4)) * 12 + (+r.t.slice(5, 7)); r.hour = +r.t.slice(11, 13);
+  r.wd = (new Date(r.date + 'T00:00:00').getDay() + 6) % 7; r.ch = r.pr === r.me ? r.pr : r.pr + ' ' + r.me;
+  TX.push(r);
+}
+const LAST = TX.reduce((a, r) => r.date > a ? r.date : a, '');
+// global firsts (full history, successful activity)
+const first = { m: {}, tr: {}, p: {}, cu: {} };
+for (const r of [...TX].sort((a, b) => a.t < b.t ? -1 : 1)) {
+  if (!r.ok) continue;
+  for (const k of ['m', 'tr', 'p']) if (!(r[k] in first[k])) first[k][r[k]] = r.mi;
+  if (r.d === 'D' && r.cu && !(r.cu in first.cu)) first.cu[r.cu] = r.mi;
+}
+TX.forEach(r => { r.vin = first.m[r.m] || null; });
+const lastPay = {}; TX.forEach(r => { if (r.ok && r.d === 'D') { if (!lastPay[r.tr] || r.date > lastPay[r.tr]) lastPay[r.tr] = r.date; } });
+const termOf = {}; TX.forEach(r => { (termOf[r.tr] = termOf[r.tr] || new Set()).add(r.m); });
+
+// ------------------------------------------------------------------ formatting
+const S = { ccy: (RAW.rc === 'USD' ? 'USD' : 'ZMW'), from: null, to: null, cmp: 'prev', preset: 'mtd', gran: 'week', sBy: 'pr', hMetric: 'cnt' };
+// conversion to the reporting currency: amount / (txn ccy per USD) x (reporting ccy per USD) - cross rate via USD
+const fxRow = mi => RAW.fxall[mi] || RAW.fxall[Object.keys(RAW.fxall).map(Number).filter(k => k <= mi).sort((a, b) => b - a)[0]] || { USD: 1 };
+const rate = (mi, ccy) => ccy === 'USD' ? 1 : (fxRow(mi)[ccy] || null);
+const FXMISS = new Set();
+const fxOf = (mi, ccy) => { ccy = ccy || 'ZMW'; if (ccy === S.ccy) return 1; const a = rate(mi, ccy), b = rate(mi, S.ccy); if (!a || !b) { FXMISS.add(mi + ':' + ccy); return 1; } return a / b; };
+const cv = (v, r) => v / fxOf(r.mi, r.ccy);
+function compact(v, dp) {
+  if (v == null || isNaN(v)) return '-';
+  const a = Math.abs(v); let s;
+  if (a >= 1e6) s = (v / 1e6).toFixed(a >= 1e7 ? 1 : 2) + 'M'; else if (a >= 1e4) s = (v / 1e3).toFixed(1) + 'K';
+  else s = v.toLocaleString('en-US', { maximumFractionDigits: dp == null ? (a < 100 ? 2 : 0) : dp, minimumFractionDigits: 0 });
+  return s;
+}
+const money = (v, dp) => { if (v == null || isNaN(v)) return '-'; const s = compact(Math.abs(v), dp); return (v < 0 ? '-' : '') + (S.ccy === 'USD' ? '$' : 'ZMW ') + s; };
+const num = v => v == null || isNaN(v) ? '-' : Math.round(v).toLocaleString('en-US');
+const pct = (v, dp = 1) => v == null || !isFinite(v) ? '-' : (v * 100).toFixed(dp) + '%';
+const mlab = mi => { const y = Math.floor((mi - 1) / 12), m = (mi - 1) % 12; return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] + '-' + String(y).slice(2); };
+const dlab = d => { const x = new Date(d + 'T00:00:00'); return x.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][x.getMonth()]; };
+
+// ------------------------------------------------------------------ dates & periods
+const addDays = (d, n) => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + n); return iso(x); };
+const iso = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+const addMonths = (d, n) => { const x = new Date(d + 'T00:00:00'); const day = x.getDate(); x.setDate(1); x.setMonth(x.getMonth() + n); const dim = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate(); x.setDate(Math.min(day, dim)); return iso(x); };
+const som = d => d.slice(0, 8) + '01';
+const eom = d => { const x = new Date(d + 'T00:00:00'); return iso(new Date(x.getFullYear(), x.getMonth() + 1, 0)); };
+const days = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5) + 1;
+const PRESETS = [
+  ['mtd', 'Month to date', () => [som(LAST), LAST], 'month'],
+  ['lm', 'Last full month', () => { const s = addMonths(som(LAST), -1); return [s, eom(s)]; }, 'month'],
+  ['qtd', 'Quarter to date', () => { const x = new Date(LAST + 'T00:00:00'); const q = Math.floor(x.getMonth() / 3) * 3; return [iso(new Date(x.getFullYear(), q, 1)), LAST]; }, 'quarter'],
+  ['ytd', 'Year to date', () => [LAST.slice(0, 4) + '-01-01', LAST], 'year'],
+  ['l7', 'Last 7 days', () => [addDays(LAST, -6), LAST], 'days'],
+  ['l30', 'Last 30 days', () => [addDays(LAST, -29), LAST], 'days'],
+  ['l90', 'Last 90 days', () => [addDays(LAST, -89), LAST], 'days'],
+  ['all', 'All time', () => [TX.reduce((a, r) => r.date < a ? r.date : a, LAST), LAST], 'days'],
+  ['custom', 'Custom range', null, 'days']];
+const CMP_OPTS = [['prev', 'Prior period (like for like)'], ['ly', 'Same period last year'], ...PRESETS.filter(p => p[0] !== 'custom').map(p => ['p:' + p[0], p[1]]), ['custom', 'Custom range'], ['none', 'No comparison']];
+function baseWindow() {
+  if (S.cmp === 'none') return null;
+  if (S.cmp === 'custom') return S.cfrom && S.cto ? [S.cfrom, S.cto] : null;
+  if (S.cmp.startsWith('p:')) { const p = PRESETS.find(x => x[0] === S.cmp.slice(2)); return p ? p[2]() : null; }
+  if (S.cmp === 'ly') return [addMonths(S.from, -12), addMonths(S.to, -12)];
+  const kind = (PRESETS.find(p => p[0] === S.preset) || [])[3] || 'days';
+  if (kind === 'month') { const f = addMonths(S.from, -1); const t = S.preset === 'lm' ? eom(f) : addMonths(S.to, -1); return [f, t]; }
+  if (kind === 'quarter') return [addMonths(S.from, -3), addMonths(S.to, -3)];
+  if (kind === 'year' && S.preset === 'ytd') return [addMonths(S.from, -12), addMonths(S.to, -12)];
+  const n = days(S.from, S.to); return [addDays(S.from, -n), addDays(S.from, -1)];
+}
+
+// ------------------------------------------------------------------ filters
+const DIMS = [['fParent', 'p', 'All parents'], ['fMerchant', 'm', 'All merchants'], ['fTerminal', 'tr', 'All terminals'], ['fType', 'mt', 'All types'], ['fProv', 'pr', 'All providers'], ['fMethod', 'me', 'All methods']];
+const F = { p: '', m: '', tr: '', mt: '', pr: '', me: '' };
+function inScope(r, skip) { for (const k in F) if (k !== skip && F[k] && r[k] !== F[k]) return false; return true; }
+function fillDims() {
+  for (const [id, k, all] of DIMS) {
+    const sel = $('#' + id), cur = F[k];
+    const vals = [...new Set(TX.filter(r => inScope(r, k)).map(r => r[k]))].sort();
+    sel.textContent = ''; sel.appendChild(el('option', { value: '' }, all));
+    vals.forEach(v => sel.appendChild(el('option', { value: v }, v)));
+    sel.value = vals.includes(cur) ? cur : ''; F[k] = sel.value;
+  }
+}
+const SCOPE = () => TX.filter(r => inScope(r));
+const inWin = (r, w) => w && r.date >= w[0] && r.date <= w[1];
+
+// ------------------------------------------------------------------ aggregation
+function agg(rows) {
+  const a = { tpv: 0, cnt: 0, fee: 0, mf: 0, cf: 0, cost: 0, bonus: 0, n: 0, wd: 0, wdn: 0, att: 0, fail: 0, pend: 0, depcost: 0, depfee: 0, wdnet: 0, ter: new Set(), mer: new Set(), par: new Set(), cust: new Set(), newc: 0, okn: 0 };
+  for (const r of rows) {
+    a.att++; if (r.g === 'Rejected') a.fail++; if (r.g === 'In progress') a.pend++;
+    if (!r.ok) continue;
+    a.okn++;
+    const k = fxOf(r.mi, r.ccy);
+    a.fee += r.f / k; a.mf += r.mf / k; a.cf += r.cf / k; a.cost += r.c / k; a.bonus += r.b / k; a.n += r.n / k;
+    a.ter.add(r.tr); a.mer.add(r.m); a.par.add(r.p);
+    if (r.d === 'D') { a.tpv += r.a / k; a.cnt++; a.depcost += r.c / k; a.depfee += r.f / k; if (r.cu) a.cust.add(r.cu); }
+    else { a.wd += r.a / k; a.wdn++; a.wdnet += (r.f - r.c - r.b) / k; }
+  }
+  a.atv = a.cnt ? a.tpv / a.cnt : null; a.take = a.tpv ? a.n / a.tpv : null; a.succ = a.att ? a.okn / a.att : null;
+  a.nter = a.ter.size; a.nmer = a.mer.size; a.npar = a.par.size; a.ncust = a.cust.size; a.frate = a.att ? a.fail / a.att : null;
+  return a;
+}
+function newCust(rows, w) { const s = new Set(); rows.forEach(r => { if (r.ok && r.d === 'D' && r.cu && inWin(r, w)) { const fm = first.cu[r.cu]; const ff = firstDate[r.cu]; if (ff >= w[0] && ff <= w[1]) s.add(r.cu); } }); return s.size; }
+const firstDate = {}; [...TX].sort((a, b) => a.t < b.t ? -1 : 1).forEach(r => { if (r.ok && r.d === 'D' && r.cu && !(r.cu in firstDate)) firstDate[r.cu] = r.date; });
+const growth = (a, b) => (b == null || b === 0 || a == null) ? null : a / Math.abs(b) - Math.sign(b);
+function groupBy(rows, key) { const m = new Map(); rows.forEach(r => { const k = typeof key === 'function' ? key(r) : r[key]; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
+
+// ------------------------------------------------------------------ tooltip
+const tt = $('#tt');
+function showTT(ev, lines) {
+  tt.textContent = '';
+  lines.forEach(([k, v, color], i) => {
+    const d = el('div');
+    if (color) { const s = el('span'); s.style.cssText = `display:inline-block;width:12px;height:2px;background:${color};margin-right:6px;vertical-align:middle`; d.appendChild(s); }
+    const vv = el('span', { class: i === 0 && !v ? 'k' : 'v' }, v || ''); const kk = el('span', { class: 'k' }, (v ? '  ' : '') + k);
+    if (v) { d.appendChild(vv); d.appendChild(kk); } else { kk.style.fontWeight = '600'; kk.style.color = 'var(--ink)'; d.appendChild(kk); }
+    tt.appendChild(d);
+  });
+  tt.style.display = 'block';
+  const x = Math.min(ev.clientX + 14, innerWidth - tt.offsetWidth - 8), y = Math.min(ev.clientY + 14, innerHeight - tt.offsetHeight - 8);
+  tt.style.left = x + 'px'; tt.style.top = y + 'px';
+}
+const hideTT = () => tt.style.display = 'none';
+function hit(node, linesFn) { node.style.cursor = 'default'; node.addEventListener('pointermove', e => showTT(e, linesFn())); node.addEventListener('pointerleave', hideTT); node.setAttribute('tabindex', '0'); node.addEventListener('focus', e => { const b = node.getBoundingClientRect(); showTT({ clientX: b.right, clientY: b.top }, linesFn()); }); node.addEventListener('blur', hideTT); }
+
+// ------------------------------------------------------------------ charts
+function frame(id, h) { const host = document.getElementById(id); host.textContent = ''; const W = Math.max(280, host.clientWidth || 520); const s = sv('svg', { width: W, height: h, viewBox: `0 0 ${W} ${h}` }); host.appendChild(s); return [s, W]; }
+function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+function yAxis(s, x0, x1, y0, y1, lo, hi, fmt, ticks = 4) {
+  for (let i = 0; i <= ticks; i++) {
+    const v = lo + (hi - lo) * i / ticks, y = y0 - (y0 - y1) * i / ticks;
+    s.appendChild(sv('line', { x1: x0, x2: x1, y1: y, y2: y, stroke: css(v === 0 ? '--axis' : '--grid'), 'stroke-width': 1 }));
+    const t = sv('text', { x: x0 - 6, y: y + 4, 'text-anchor': 'end' }); t.textContent = fmt(v); s.appendChild(t);
+  }
+}
+function roundTop(x, y, w, h, r = 4) { if (h <= 0) return ''; r = Math.min(r, h, w / 2); return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; }
+function roundBot(x, y, w, h, r = 4) { if (h <= 0) return ''; r = Math.min(r, h, w / 2); return `M${x},${y}V${y + h - r}Q${x},${y + h} ${x + r},${y + h}H${x + w - r}Q${x + w},${y + h} ${x + w},${y + h - r}V${y}Z`; }
+// columns: cats [{label, v, hl}], one series
+function columns(id, cats, o = {}) {
+  const H = o.h || 220, [s, W] = frame(id, H), L = 56, R = 10, Tp = 12, B = 34;
+  const vals = cats.map(c => c.v || 0); const mx = niceMax(Math.max(...vals, 0)), mn = Math.min(0, ...vals) < 0 ? -niceMax(-Math.min(...vals)) : 0;
+  const y0 = H - B, y1 = Tp, sc = v => y0 - (v - mn) / (mx - mn) * (y0 - y1);
+  yAxis(s, L, W - R, y0, y1, mn, mx, o.afmt || (v => compact(v)));
+  const n = cats.length, band = (W - L - R) / Math.max(n, 1), bw = Math.min(24, band - 2);
+  const step = Math.ceil(n / Math.floor((W - L - R) / 46));
+  cats.forEach((c, i) => {
+    const x = L + i * band + (band - bw) / 2, v = c.v || 0, yv = sc(v), yz = sc(0);
+    if (c.hl) s.appendChild(sv('rect', { x: L + i * band, y: y1, width: band, height: y0 - y1, fill: css('--wash') }));
+    const p = sv('path', { d: v >= 0 ? roundTop(x, yv, bw, yz - yv) : roundBot(x, yz, bw, yv - yz), fill: css(c.color || o.color || '--s1') });
+    s.appendChild(p);
+    const hitR = sv('rect', { x: L + i * band, y: y1, width: band, height: y0 - y1, fill: 'transparent' }); s.appendChild(hitR);
+    hit(hitR, () => [[c.label], [o.tip ? o.tip(c) : (o.fmt || compact)(v), o.name || '']]);
+    if (i % step === 0) { const t = sv('text', { x: L + i * band + band / 2, y: y0 + 16, 'text-anchor': 'middle' }); t.textContent = c.label; s.appendChild(t); }
+  });
+  if (o.labelLast && n) { const c = cats[n - 1]; const t = sv('text', { x: L + (n - 1) * band + band / 2, y: sc(c.v || 0) - 5, 'text-anchor': 'middle', class: 'lblb' }); t.textContent = (o.fmt || compact)(c.v || 0); s.appendChild(t); }
+}
+function line(id, pts, o = {}) {
+  const H = o.h || 220, [s, W] = frame(id, H), L = 56, R = 14, Tp = 12, B = 34;
+  const vals = pts.map(p => p.v).filter(v => v != null);
+  const lo = o.min != null ? o.min : 0, hi = o.max != null ? o.max : niceMax(Math.max(...vals, 0.0001));
+  const y0 = H - B, y1 = Tp, sc = v => y0 - (v - lo) / (hi - lo) * (y0 - y1);
+  yAxis(s, L, W - R, y0, y1, lo, hi, o.fmt || compact);
+  const n = pts.length, band = (W - L - R) / Math.max(n, 1), X = i => L + i * band + band / 2;
+  pts.forEach((p, i) => { if (p.hl) s.appendChild(sv('rect', { x: L + i * band, y: y1, width: band, height: y0 - y1, fill: css('--wash') })); });
+  let d = ''; pts.forEach((p, i) => { if (p.v == null) return; d += (d ? 'L' : 'M') + X(i) + ',' + sc(p.v); });
+  s.appendChild(sv('path', { d, fill: 'none', stroke: css(o.color || '--s1'), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+  const step = Math.ceil(n / Math.floor((W - L - R) / 46));
+  pts.forEach((p, i) => {
+    if (p.v != null && (n <= 40 || i === n - 1)) s.appendChild(sv('circle', { cx: X(i), cy: sc(p.v), r: 4, fill: css(o.color || '--s1'), stroke: css('--card'), 'stroke-width': 2 }));
+    if (i % step === 0) { const t = sv('text', { x: X(i), y: y0 + 16, 'text-anchor': 'middle' }); t.textContent = p.label; s.appendChild(t); }
+  });
+  const g = sv('line', { y1: y1, y2: y0, stroke: css('--axis'), 'stroke-width': 1, visibility: 'hidden' }); s.appendChild(g);
+  const ov = sv('rect', { x: L, y: y1, width: W - L - R, height: y0 - y1, fill: 'transparent' }); s.appendChild(ov);
+  ov.addEventListener('pointermove', e => { const bx = s.getBoundingClientRect(); const i = Math.max(0, Math.min(n - 1, Math.floor((e.clientX - bx.left - L) / band))); g.setAttribute('x1', X(i)); g.setAttribute('x2', X(i)); g.setAttribute('visibility', 'visible'); const p = pts[i]; showTT(e, [[p.label], [(o.fmt || compact)(p.v), o.name || '', css(o.color || '--s1')], ...(p.extra || [])]); });
+  ov.addEventListener('pointerleave', () => { g.setAttribute('visibility', 'hidden'); hideTT(); });
+  if (n) { const p = pts[n - 1]; if (p.v != null) { const t = sv('text', { x: X(n - 1) - 6, y: sc(p.v) - 9, 'text-anchor': 'end', class: 'lblb' }); t.textContent = (o.fmt || compact)(p.v); s.appendChild(t); } }
+}
+function stacked(id, cats, series, o = {}) {
+  const host = document.getElementById(id); host.textContent = '';
+  const lg = el('div', { class: 'legend' }); series.forEach((se, i) => { const it = el('span'); const sw = el('i'); sw.style.background = css(se.color || SER[i % 8]); it.appendChild(sw); it.appendChild(document.createTextNode(se.name)); lg.appendChild(it); }); host.appendChild(lg);
+  const holder = el('div'); holder.id = id + '_s'; host.appendChild(holder);
+  const H = o.h || 240, [s, W] = frame(id + '_s', H), L = 56, R = 10, Tp = 12, B = 34;
+  const tot = cats.map((c, i) => series.reduce((a, se) => a + Math.max(0, se.v[i] || 0), 0));
+  const mx = o.max || niceMax(Math.max(...tot, 0)); const y0 = H - B, y1 = Tp, sc = v => (y0 - y1) * v / mx;
+  yAxis(s, L, W - R, y0, y1, 0, mx, o.afmt || compact);
+  const n = cats.length, band = (W - L - R) / Math.max(n, 1), bw = Math.min(24, band - 2), step = Math.ceil(n / Math.floor((W - L - R) / 46));
+  cats.forEach((c, i) => {
+    let y = y0; const x = L + i * band + (band - bw) / 2; const nonzero = series.map((se, j) => j).filter(j => (series[j].v[i] || 0) > 0); const top = nonzero[nonzero.length - 1];
+    series.forEach((se, j) => { const v = Math.max(0, se.v[i] || 0); if (!v) return; const h = sc(v); const gap = j === top ? 0 : 2; y -= h; s.appendChild(sv('path', { d: j === top ? roundTop(x, y, bw, Math.max(0, h)) : `M${x},${y + gap}h${bw}v${Math.max(0, h - gap)}h${-bw}Z`, fill: css(se.color || SER[j % 8]) })); });
+    const hr = sv('rect', { x: L + i * band, y: y1, width: band, height: y0 - y1, fill: 'transparent' }); s.appendChild(hr);
+    hit(hr, () => [[c], ...series.map((se, j) => [se.name, (o.fmt || compact)(se.v[i] || 0), css(se.color || SER[j % 8])]), ['Total', (o.fmt || compact)(tot[i])]]);
+    if (i % step === 0) { const t = sv('text', { x: L + i * band + band / 2, y: y0 + 16, 'text-anchor': 'middle' }); t.textContent = c; s.appendChild(t); }
+  });
+}
+function hbars(id, items, o = {}) {
+  const rowH = 26, H = Math.max(60, items.length * rowH + 10), [s, W] = frame(id, H);
+  const lw = Math.min(230, W * 0.4), R = 70, vals = items.map(i => i.v || 0);
+  const mx = Math.max(...vals.map(Math.abs), 1e-9), hasNeg = vals.some(v => v < 0);
+  const x0 = hasNeg ? lw + (W - lw - R) / 2 : lw, scale = (hasNeg ? (W - lw - R) / 2 : (W - lw - R)) / mx;
+  if (hasNeg) s.appendChild(sv('line', { x1: x0, x2: x0, y1: 0, y2: H, stroke: css('--axis') }));
+  items.forEach((it, i) => {
+    const y = 5 + i * rowH, v = it.v || 0, w = Math.abs(v) * scale, bh = 16;
+    const t = sv('text', { x: lw - 8, y: y + 13, 'text-anchor': 'end', class: 'lbl' }); t.textContent = it.label.length > 26 ? it.label.slice(0, 25) + '…' : it.label; s.appendChild(t);
+    const x = v >= 0 ? x0 : x0 - w; const r = Math.min(4, w / 2);
+    s.appendChild(sv('path', { d: v >= 0 ? `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + bh - r}Q${x + w},${y + bh} ${x + w - r},${y + bh}H${x}Z` : `M${x + w},${y}H${x + r}Q${x},${y} ${x},${y + r}V${y + bh - r}Q${x},${y + bh} ${x + r},${y + bh}H${x + w}Z`, fill: css(it.color || o.color || '--s1') }));
+    const vt = sv('text', { x: v >= 0 ? x + w + 6 : x - 6, y: y + 13, 'text-anchor': v >= 0 ? 'start' : 'end', class: 'lblb' }); vt.textContent = (o.fmt || compact)(v); s.appendChild(vt);
+    const hr = sv('rect', { x: 0, y: y - 4, width: W, height: rowH, fill: 'transparent' }); s.appendChild(hr);
+    hit(hr, () => [[it.label], [(o.fmt || compact)(v), o.name || ''], ...(it.extra || [])]);
+    if (o.onClick) { hr.style.cursor = 'pointer'; hr.addEventListener('click', () => o.onClick(it)); }
+  });
+}
+function waterfall(id, steps, o = {}) {
+  const H = o.h || 300, [s, W] = frame(id, H), L = 60, R = 10, Tp = 18, B = 86;
+  let run = 0; const bars = steps.map(st => { if (st.total) { run = st.v; return { ...st, lo: Math.min(0, st.v), hi: Math.max(0, st.v), end: st.v }; } const a = run, b = run + st.v; run = b; return { ...st, lo: Math.min(a, b), hi: Math.max(a, b), end: b }; });
+  const mx = niceMax(Math.max(...bars.map(b => b.hi), 0)), mnRaw = Math.min(...bars.map(b => b.lo), 0), mn = mnRaw < 0 ? -niceMax(-mnRaw) : 0;
+  const y0 = H - B, y1 = Tp, sc = v => y0 - (v - mn) / (mx - mn) * (y0 - y1);
+  yAxis(s, L, W - R, y0, y1, mn, mx, o.afmt || compact);
+  const n = bars.length, band = (W - L - R) / n, bw = Math.min(46, band * 0.62);
+  bars.forEach((b, i) => {
+    const x = L + i * band + (band - bw) / 2, yt = sc(b.hi), yb = sc(b.lo), h = Math.max(1, yb - yt);
+    const color = b.total ? css('--total') : (b.v >= 0 ? css('--good') : css('--crit'));
+    s.appendChild(sv('rect', { x, y: yt, width: bw, height: h, rx: 3, fill: color }));
+    if (i < n - 1) { const ny = sc(b.end); s.appendChild(sv('line', { x1: x + bw, x2: L + (i + 1) * band + (band - bw) / 2, y1: ny, y2: ny, stroke: css('--axis'), 'stroke-width': 1 })); }
+    const lab = sv('text', { x: x + bw / 2, y: yt - 5, 'text-anchor': 'middle', class: 'lblb' }); const tiny = Math.abs(b.v) < (mx - mn) * 0.001; lab.textContent = tiny ? '0' : (b.total ? '' : (b.v >= 0 ? '+' : '')) + (o.fmt || compact)(b.v); s.appendChild(lab);
+    const words = b.label.length > 26 ? b.label.slice(0, 25) + '…' : b.label;
+    const t = sv('text', { x: x + bw / 2, y: y0 + 12, 'text-anchor': 'end', transform: `rotate(-35 ${x + bw / 2} ${y0 + 12})`, class: 'lbl' }); t.textContent = words; s.appendChild(t);
+    const hr = sv('rect', { x: L + i * band, y: y1, width: band, height: y0 - y1, fill: 'transparent' }); s.appendChild(hr);
+    hit(hr, () => [[b.label], [(b.total ? '' : (b.v >= 0 ? '+' : '')) + (o.fmt || compact)(b.v), b.total ? 'total' : 'change'], ...(b.total ? [] : [[ 'running total', (o.fmt || compact)(b.end)]])]);
+  });
+}
+function heat(id, rowsL, colsL, M, o = {}) {
+  const host = document.getElementById(id); host.textContent = '';
+  const cw = o.cw || 34, ch = o.ch || 18, lw = o.lw || 70, H = rowsL.length * ch + 30, W = lw + colsL.length * cw + 10;
+  const s = sv('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}` }); host.appendChild(s); host.style.overflowX = 'auto';
+  const all = M.flat().filter(v => v != null && isFinite(v)); const mx = o.max != null ? o.max : Math.max(...all, 1e-9), mn = o.min != null ? o.min : Math.min(0, ...all);
+  const c1 = hex(css('--seq1')), c7 = hex(css('--seq7')), neg = hex(css('--crit'));
+  colsL.forEach((c, j) => { const t = sv('text', { x: lw + j * cw + cw / 2, y: 12, 'text-anchor': 'middle' }); t.textContent = c; s.appendChild(t); });
+  rowsL.forEach((r, i) => {
+    const t = sv('text', { x: lw - 6, y: 20 + i * ch + ch / 2 + 4, 'text-anchor': 'end', class: 'lbl' }); t.textContent = r; s.appendChild(t);
+    colsL.forEach((c, j) => {
+      const v = M[i][j]; if (v == null) return;
+      const k = mx === mn ? 1 : Math.max(0, Math.min(1, (v - Math.max(0, mn)) / (mx - Math.max(0, mn))));
+      const fill = v < 0 ? mix(hex(css('--card')), neg, 0.55) : mix(c1, c7, k);
+      const rc = sv('rect', { x: lw + j * cw + 1, y: 20 + i * ch + 1, width: cw - 2, height: ch - 2, rx: 2, fill }); s.appendChild(rc);
+      if (o.labels) { const tl = sv('text', { x: lw + j * cw + cw / 2, y: 20 + i * ch + ch / 2 + 4, 'text-anchor': 'middle' }); tl.style.fill = (k > 0.55 && v >= 0) ? '#ffffff' : css('--ink'); tl.style.fontSize = '10px'; tl.textContent = o.fmt(v); s.appendChild(tl); }
+      hit(rc, () => [[r + ' · ' + c], [o.fmt ? o.fmt(v) : compact(v), o.name || '']]);
+    });
+  });
+}
+function empty(id, msg) { const h = document.getElementById(id); h.textContent = ''; const d = el('div', {}, msg || 'No successful transactions for this selection.'); d.style.cssText = 'color:var(--muted);font-size:13px;padding:18px 0'; h.appendChild(d); }
+function hex(c) { c = c.replace('#', ''); if (c.length === 3) c = c.split('').map(x => x + x).join(''); return [0, 2, 4].map(i => parseInt(c.slice(i, i + 2), 16)); }
+function mix(a, b, k) { return 'rgb(' + a.map((x, i) => Math.round(x + (b[i] - x) * k)).join(',') + ')'; }
+function table(host, heads, rows, o = {}) {
+  host = typeof host === 'string' ? document.getElementById(host) : host; host.textContent = '';
+  const t = el('table'), th = el('thead'), tr = el('tr'); heads.forEach((h, i) => { const c = el('th', {}, h); if (o.sort !== false) c.addEventListener('click', () => { const dir = c.dataset.dir === 'd' ? 'a' : 'd'; c.dataset.dir = dir; rows.sort((a, b) => { const x = a.raw ? a.raw[i] : a.cells[i], y = b.raw ? b.raw[i] : b.cells[i]; return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * (dir === 'd' ? -1 : 1); }); table(host, heads, rows, o); }); tr.appendChild(c); }); th.appendChild(tr); t.appendChild(th);
+  const tb = el('tbody'); rows.forEach(r => { const row = el('tr'); if (r.cls) row.className = r.cls; r.cells.forEach((c, i) => { const td = el('td'); if (c instanceof Node) td.appendChild(c); else td.textContent = c; if (r.colors && r.colors[i]) td.className = r.colors[i]; row.appendChild(td); }); if (r.onClick) { row.style.cursor = 'pointer'; row.addEventListener('click', r.onClick); } tb.appendChild(row); }); t.appendChild(tb);
+  if (o.foot) { const tf = el('tbody'); const row = el('tr', { class: 'tot' }); o.foot.forEach(c => row.appendChild(el('td', {}, c))); tf.appendChild(row); t.appendChild(tf); }
+  host.appendChild(t);
+}
+const chg = (x, y, f) => { if (y == null) return ''; if (!y) return x ? 'new' : '-'; if (y < 0 || x < 0) return sgn(x - y, f || compact); return x / y >= 1.5 ? (x / y).toFixed(1) + ' times' : sgn(x / y - 1, v => (v * 100).toFixed(0) + '%'); };
+const cls = v => v == null ? 'flat' : v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+const sgn = (v, f) => v == null ? '-' : (v > 0 ? '+' : '') + f(v);
+
+// ------------------------------------------------------------------ renderers
+let CUR, BASE, SC, CW, BW;
+let LA, LB, PAGE = 'overview';
+const RENDER = { overview: () => overview(LA, LB), trends: () => trends(), bridges: () => bridge(), merchants: () => merchants(), mix: () => mixSec(), cohorts: () => cohorts(), customers: () => customers(LA, LB), operations: () => ops(), calculator: () => calc(), data: () => dq() };
+function showPage(id, push) {
+  if (!RENDER[id]) id = 'overview'; PAGE = id;
+  document.querySelectorAll('main > section').forEach(s => s.classList.toggle('on', s.id === id));
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + id));
+  try { RENDER[id](); } catch (e) { console.error(id + ': ' + e.message); }
+  if (push !== false) history.replaceState(null, '', '#' + id);
+  window.scrollTo(0, 0);
+}
+function renderCtx() {
+  const h = $('#ctx'); h.textContent = '';
+  const per = el('span', {}, `Showing ${dlab(CW[0])} - ${dlab(CW[1])} ${CW[1].slice(0, 4)} (${days(CW[0], CW[1])} days)` + (BW ? ` vs ${dlab(BW[0])} - ${dlab(BW[1])} ${BW[1].slice(0, 4)}` : ' · no comparison') + ` · ${S.ccy}`);
+  h.appendChild(per);
+  if (BW && BW[0] <= CW[1] && BW[1] >= CW[0]) { const w = el('span', { class: 'pill w' }, 'Comparison overlaps the selected period'); h.appendChild(w); }
+  DIMS.forEach(([id, k, all]) => { if (!F[k]) return; const c = el('span', { class: 'chip' }); c.appendChild(document.createTextNode($('#' + id).closest('.f').firstChild.textContent.trim() + ': ' + F[k])); const x = el('button', { title: 'Remove filter', 'aria-label': 'Remove filter' }, '×'); x.addEventListener('click', () => { F[k] = ''; fillDims(); render(); }); c.appendChild(x); h.appendChild(c); });
+}
+function render() {
+  SC = SCOPE(); CW = [S.from, S.to]; BW = baseWindow();
+  CUR = SC.filter(r => inWin(r, CW)); BASE = BW ? SC.filter(r => inWin(r, BW)) : [];
+  const a = agg(CUR), b = BW ? agg(BASE) : null;
+  const flt = DIMS.filter(([, k]) => F[k]).map(([, k]) => F[k]).join(' · ');
+  $('#subtitle').textContent = `Data to ${dlab(LAST)} ${LAST.slice(0, 4)} · ${S.ccy}${S.ccy === 'USD' ? ' at monthly average rates' : ''} · ${RAW.meta.zoyk === 1 ? '100% Zoyk' : ''}`;
+  $('#ovLead').textContent = `${dlab(CW[0])} - ${dlab(CW[1])} ${CW[1].slice(0, 4)} (${days(CW[0], CW[1])} days)` + (BW ? ` vs ${dlab(BW[0])} - ${dlab(BW[1])} ${BW[1].slice(0, 4)}` : '') + (flt ? ` · filtered: ${flt}` : ' · all merchants');
+  window.__S = { cw: CW, bw: BW, cur: { n: a.n, tpv: a.tpv, cnt: a.cnt, ter: a.nter, cust: a.ncust, att: a.att, fail: a.fail }, scopeTpv: agg(SC).tpv, scopeN: agg(SC).n };
+  const safe = (fn, ...x) => { try { fn(...x); } catch (e) { console.error(fn.name + ': ' + e.message); } };
+  LA = a; LB = b; renderCtx();
+  $('#fCFrom').value = BW ? BW[0] : ''; $('#fCTo').value = BW ? BW[1] : ''; $('#fCFrom').disabled = $('#fCTo').disabled = S.cmp === 'none';
+  safe(overview, a, b); safe(trends); safe(bridge); safe(merchants); safe(mixSec); safe(cohorts); safe(customers, a, b); safe(ops); safe(calc); safe(dq);
+  if (document.querySelector('main > section.on')) safe(RENDER[PAGE]);
+}
+function overview(a, b) {
+  const nc = newCust(SC, CW), nb = BW ? newCust(SC, BW) : null;
+  const tiles = [['Net revenue', a.n, b && b.n, money, true], ['TPV', a.tpv, b && b.tpv, money], ['Payments accepted', a.cnt, b && b.cnt, num], ['Average ticket', a.atv, b && b.atv, v => money(v, 2)],
+    ['Take rate', a.take, b && b.take, v => pct(v, 2), false, true], ['Success rate', a.succ, b && b.succ, pct, false, true], ['Active terminals', a.nter, b && b.nter, num], ['Unique payers', a.ncust, b && b.ncust, num]];
+  const host = $('#tiles'); host.textContent = '';
+  tiles.forEach(([lab, v, bv, f, hero, isRate]) => {
+    const c = el('div', { class: 'card tile' + (hero ? ' hero' : '') }); if (hero) c.style.gridColumn = 'span 2';
+    c.appendChild(el('div', { class: 'lab' }, lab)); const vv = el('div', { class: 'val' }, f(v)); vv.dataset.raw = v == null ? '' : v; vv.dataset.base = bv == null ? '' : bv; vv.dataset.key = lab; c.appendChild(vv);
+    if (BW) { const g = isRate ? (v != null && bv != null ? v - bv : null) : growth(v, bv); const txt = isRate ? (g == null ? '' : sgn(g * 100, x => x.toFixed(2) + ' pp')) : chg(v, bv, f); const d = el('div', { class: 'dl ' + cls(isRate ? g : (v || 0) - (bv || 0)) }, (txt || '') + (bv != null ? ' vs ' + f(bv) : '')); c.appendChild(d); }
+    host.appendChild(c);
+  });
+  // period in numbers
+  const rows = [['Payments accepted', a.cnt, b && b.cnt, num], ['Amount accepted (TPV)', a.tpv, b && b.tpv, money], ['Fees paid (merchant + customer)', a.fee, b && b.fee, money], ['   of which merchant fees', a.mf, b && b.mf, money], ['   of which customer fees', a.cf, b && b.cf, money], ['Provider cost', a.cost, b && b.cost, money],
+    ['Agent rebate', a.bonus, b && b.bonus, money], ['Partner net revenue', a.n, b && b.n, money],
+    ['Withdrawals', a.wd, b && b.wd, v => money(v) + ` in ${0}`], ['Failed attempts', a.fail, b && b.fail, num], ['Merchants that transacted', a.nmer, b && b.nmer, num], ['New paying customers', nc, nb, num]];
+  const change = (x, y, f) => chg(x, y, f);
+  const trs = rows.map(([l, x, y, f]) => {
+    let fx = f(x), fy = BW ? f(y) : '';
+    if (l === 'Withdrawals') { fx = money(x) + ' in ' + a.wdn; fy = BW ? money(y) + ' in ' + b.wdn : ''; }
+    if (l === 'Failed attempts') { fx = `${num(x)} of ${num(a.att)}, ${pct(a.frate, 0)}`; fy = BW ? `${num(y)} of ${num(b.att)}, ${pct(b.frate, 0)}` : ''; }
+    const ch = BW ? change(x, y, f) : ''; return { cells: [l, fx, fy, ch], colors: [null, null, null, cls(BW ? (x || 0) - (y || 0) : null)] };
+  });
+  $('#pinNote').textContent = BW ? `This period vs ${(CMP_OPTS.find(o => o[0] === S.cmp) || ['', 'comparison'])[1].toLowerCase()} (${dlab(BW[0])} - ${dlab(BW[1])} ${BW[1].slice(0, 4)})` : 'No comparison selected';
+  table('pin', ['', 'This period', BW ? 'Comparison' : '', BW ? 'Change' : ''], trs, { sort: false });
+  waterfall('cFeeWf', [{ label: 'Merchant fees', v: a.mf, total: true }, { label: 'Customer fees', v: a.cf }, { label: 'Provider cost', v: -a.cost }, { label: 'Agent rebate', v: -a.bonus }, { label: 'Partner net revenue', v: a.n, total: true }], { h: 260, fmt: v => money(v) });
+}
+function bucket(r) { if (S.gran === 'month') return r.date.slice(0, 7); if (S.gran === 'day') return r.date; const x = new Date(r.date + 'T00:00:00'); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return iso(x); }
+function bucketLabel(k) { if (S.gran === 'month') return mlab(+k.slice(0, 4) * 12 + +k.slice(5, 7)); return dlab(k); }
+function trends() {
+  const g = groupBy(SC, bucket); const keys = [...g.keys()].sort();
+  // fill gaps
+  const all = []; if (keys.length) { let k = keys[0]; const last = keys[keys.length - 1]; let guard = 0; while (k <= last && guard++ < 2000) { all.push(k); k = S.gran === 'month' ? addMonths(k + (k.length === 7 ? '-01' : ''), 1).slice(0, 7) : addDays(k, S.gran === 'day' ? 1 : 7); } }
+  const per = all.map(k => { const rows = g.get(k) || []; const a = agg(rows); const kd = k.length === 7 ? k + '-01' : k; const ke = S.gran === 'month' ? eom(kd) : S.gran === 'week' ? addDays(kd, 6) : kd; return { k, label: bucketLabel(k), a, hl: ke >= CW[0] && kd <= CW[1] }; });
+  window.__S.trendTpv = per.reduce((s, p) => s + p.a.tpv, 0); window.__S.trendHl = per.filter(p => p.hl).length;
+  columns('cTpv', per.map(p => ({ label: p.label, v: p.a.tpv, hl: p.hl })), { fmt: v => money(v), name: 'TPV', labelLast: true });
+  columns('cNet', per.map(p => ({ label: p.label, v: p.a.n, hl: p.hl })), { fmt: v => money(v), name: 'net revenue', labelLast: true });
+  columns('cPay', per.map(p => ({ label: p.label, v: p.a.cnt, hl: p.hl })), { fmt: num, name: 'payments', labelLast: true });
+  line('cSucc', per.map(p => ({ label: p.label, v: p.a.att ? p.a.succ : null, hl: p.hl, extra: [['attempts', num(p.a.att)], ['failed', num(p.a.fail)]] })), { fmt: v => pct(v, 0), max: 1, name: 'success rate' });
+  columns('cTer', per.map(p => ({ label: p.label, v: p.a.nter, hl: p.hl })), { fmt: num, name: 'terminals', labelLast: true });
+  line('cTake', per.map(p => ({ label: p.label, v: p.a.tpv ? p.a.take : null, hl: p.hl })), { fmt: v => pct(v, 2), name: 'take rate', min: Math.min(0, ...per.map(p => p.a.take || 0)), max: Math.max(0.02, niceMax(Math.max(...per.map(p => p.a.take || 0)))) });
+}
+function bridge() {
+  const type = $('#bType').value, met = $('#bMetric').value, f = v => money(v, Math.abs(v) < 100 ? 2 : 0);
+  const host = $('#cBridge'); $('#cBridge_t').textContent = '';
+  if (!BW) { host.textContent = 'Pick a comparison period to see the bridge.'; return; }
+  const a = agg(CUR), b = agg(BASE); let steps = [], title = '', note = '';
+  const val = (x) => met === 'n' ? x.n : x.tpv, mname = met === 'n' ? 'Net revenue' : 'TPV';
+  const baseLab = `Base ${dlab(BW[0])}-${dlab(BW[1])}`, curLab = `This ${dlab(CW[0])}-${dlab(CW[1])}`;
+  if (type === 'pv') {
+    title = 'Net revenue bridge (price-volume): base period → this period';
+    const t2 = b.tpv ? b.n / b.tpv : 0, fr = x => x.tpv ? x.depfee / x.tpv : 0, cr = x => x.tpv ? x.depcost / x.tpv : 0, br = x => x.tpv ? (x.bonus - wdBonus(x === a ? CUR : BASE)) / x.tpv : 0;
+    if (!b.tpv) steps = [{ label: baseLab, v: b.n, total: true }, { label: 'New business', v: a.n - b.n }, { label: curLab, v: a.n, total: true }];
+    else steps = [{ label: baseLab, v: b.n, total: true }, { label: 'Volume (TPV)', v: (a.tpv - b.tpv) * t2 }, { label: 'Fee rate (merchant + customer)', v: a.tpv * (fr(a) - fr(b)) },
+      { label: 'Provider cost rate', v: -a.tpv * (cr(a) - cr(b)) }, { label: 'Agent rebate rate', v: -a.tpv * (br(a) - br(b)) },
+      { label: 'Withdrawal economics', v: (a.wdnet - b.wdnet) - (a.tpv - b.tpv) * (b.wdnet / b.tpv) }, { label: curLab, v: a.n, total: true }];
+    note = 'Volume = TPV change at the base take rate; rate effects measured on this period\'s TPV; withdrawal fees less cost and rebate shown separately.';
+  } else if (type === 'tpvdrv') {
+    title = 'TPV bridge: active terminals x payments per terminal x average ticket';
+    if (!b.nter) steps = [{ label: baseLab, v: b.tpv, total: true }, { label: 'New business', v: a.tpv - b.tpv }, { label: curLab, v: a.tpv, total: true }];
+    else { const P0 = b.cnt / b.nter, A0 = b.atv || 0, P1 = a.nter ? a.cnt / a.nter : 0;
+      steps = [{ label: baseLab, v: b.tpv, total: true }, { label: 'Active terminals', v: (a.nter - b.nter) * P0 * A0 }, { label: 'Payments per terminal', v: a.nter * (P1 - P0) * A0 }, { label: 'Average ticket', v: a.cnt * ((a.atv || 0) - A0) }, { label: curLab, v: a.tpv, total: true }]; }
+    note = `Terminals ${b.nter} → ${a.nter}; payments per terminal ${(b.nter ? b.cnt / b.nter : 0).toFixed(1)} → ${(a.nter ? a.cnt / a.nter : 0).toFixed(1)}; ticket ${money(b.atv, 2)} → ${money(a.atv, 2)}.`;
+  } else if (type === 'move') {
+    title = `${mname} bridge by merchant movement`;
+    const cm = groupBy(CUR, 'm'), bm = groupBy(BASE, 'm'); const cls_ = { New: 0, Reactivated: 0, 'Existing - growth': 0, 'Existing - decline': 0, Lost: 0 };
+    new Set([...cm.keys(), ...bm.keys()]).forEach(m => { const x = agg(cm.get(m) || []), y = agg(bm.get(m) || []); const ax = x.okn > 0, ay = y.okn > 0; const d = val(x) - val(y); let c;
+      if (!ax && !ay) return; if (!ay) { const fm = first.m[m]; c = (fm && fm >= (+CW[0].slice(0, 4) * 12 + +CW[0].slice(5, 7))) ? 'New' : 'Reactivated'; } else if (!ax) c = 'Lost'; else c = (x.tpv - y.tpv) >= 0 ? 'Existing - growth' : 'Existing - decline'; cls_[c] += d; });
+    steps = [{ label: baseLab, v: val(b), total: true }, ...Object.entries(cls_).map(([k, v]) => ({ label: k, v })), { label: curLab, v: val(a), total: true }];
+    note = 'New = first ever payment in this period; reactivated = no activity in the base period but older; lost = active in base only; existing split by TPV growth.';
+  } else {
+    const keyF = type === 'vin' ? (r => r.vin ? 'Vintage ' + mlab(r.vin) : 'n/a') : type;
+    const lab = { p: 'parent merchant', m: 'merchant', tr: 'terminal', vin: 'merchant vintage', me: 'payment method', pr: 'provider', mt: 'merchant type' }[type];
+    title = `${mname} bridge by ${lab}`;
+    const cg = groupBy(CUR, keyF), bg = groupBy(BASE, keyF); const ds = [];
+    new Set([...cg.keys(), ...bg.keys()]).forEach(k => { const d = val(agg(cg.get(k) || [])) - val(agg(bg.get(k) || [])); if (Math.abs(d) > 1e-9) ds.push({ label: k, v: d }); });
+    ds.sort((x, y) => Math.abs(y.v) - Math.abs(x.v)); const top = ds.slice(0, 8), other = ds.slice(8).reduce((s, x) => s + x.v, 0);
+    steps = [{ label: baseLab, v: val(b), total: true }, ...top, ...(ds.length > 8 ? [{ label: `All other (${ds.length - 8})`, v: other }] : []), { label: curLab, v: val(a), total: true }];
+    note = 'The 8 largest movers by absolute change; the rest are grouped.';
+  }
+  { const s0 = steps[0].v + steps.slice(1, -1).reduce((x, s) => x + s.v, 0); window.__S.bridgeGap = Math.abs(s0 - steps[steps.length - 1].v); window.__S.bridgeEnd = steps[steps.length - 1].v; window.__S.bridgeBase = steps[0].v; window.__S.bridgeType = type + '/' + met; }
+  $('#bTitle').textContent = title; $('#bNote').textContent = note;
+  waterfall('cBridge', steps, { h: 340, fmt: f });
+  const tv = document.querySelector('[data-t="cBridge"]'); tv.onclick = () => { const h = $('#cBridge_t'); if (h.textContent) { h.textContent = ''; tv.textContent = 'Show table'; return; } let run = 0; table(h, ['Bar', 'Change / total', 'Running total'], steps.map(s => { run = s.total ? s.v : run + s.v; return { cells: [s.label, (s.total ? '' : (s.v >= 0 ? '+' : '')) + f(s.v), f(run)] }; }), { sort: false }); tv.textContent = 'Hide table'; };
+}
+function wdBonus(rows) { let s = 0; rows.forEach(r => { if (r.ok && r.d === 'W') s += r.b / fxOf(r.mi, r.ccy); }); return s; }
+function merchants() {
+  const lv = $('#mLevel').value, rk = $('#mRank').value, lab = { p: 'parent merchant', m: 'merchant', tr: 'terminal' }[lv];
+  const cg = groupBy(CUR, lv), bg = groupBy(BASE, lv); const tot = agg(CUR);
+  const names = new Set([...cg.keys(), ...(BW ? bg.keys() : [])]);
+  const rows = [...names].map(k => { const a = agg(cg.get(k) || []), b = BW ? agg(bg.get(k) || []) : null; return { k, a, b, v: rk === 'n' ? a.n : rk === 'tpv' ? a.tpv : a.cnt }; }).sort((x, y) => y.v - x.v);
+  window.__S.mRowsN = rows.reduce((s, r) => s + r.a.n, 0); window.__S.mTotN = tot.n; window.__S.mRows = rows.length;
+  const fm = rk === 'cnt' ? num : v => money(v);
+  $('#topTitle').textContent = `Top 10 ${lab}s by ${$('#mRank').selectedOptions[0].text.toLowerCase()} - click a bar to filter`;
+  hbars('cTop', rows.slice(0, 10).map(r => ({ label: r.k, v: r.v, extra: [['TPV', money(r.a.tpv)], ['net revenue', money(r.a.n)], ['payments', num(r.a.cnt)]] })), { fmt: fm, onClick: it => setFilter(lv, it.label) });
+  const total = rows.reduce((s, r) => s + Math.max(0, r.v), 0), pos = rows.filter(r => r.v > 0);
+  const share = n => total ? pos.slice(0, n).reduce((s, r) => s + r.v, 0) / total : null; const hhi = total ? pos.reduce((s, r) => s + Math.pow(r.v / total, 2), 0) * 1e4 : null;
+  const ch = $('#conc'); ch.textContent = '';
+  [['Top 1', pct(share(1), 0)], ['Top 3', pct(share(3), 0)], ['Top 10', pct(share(10), 0)], ['HHI', hhi == null ? '-' : Math.round(hhi).toLocaleString() + (hhi > 2500 ? ' high' : hhi > 1500 ? ' moderate' : ' low')]].forEach(([l, v]) => { const c = el('div', { class: 'card tile' }); c.appendChild(el('div', { class: 'lab' }, l)); c.appendChild(el('div', { class: 'val' }, v)); ch.appendChild(c); });
+  let cum = 0; line('cPareto', pos.slice(0, 30).map((r, i) => { cum += r.v; return { label: String(i + 1), v: total ? cum / total : 0, extra: [[r.k]] }; }), { fmt: v => pct(v, 0), max: 1, name: 'cumulative share', h: 170 });
+  $('#mtTitle').textContent = `${lab[0].toUpperCase() + lab.slice(1)} table`;
+  const heads = [lab[0].toUpperCase() + lab.slice(1), ...(lv === 'tr' ? ['Merchant'] : lv === 'm' ? ['Parent'] : []), 'Payments', 'TPV', 'Avg ticket', 'Net revenue', 'Share', 'Take rate', 'Success', ...(BW ? ['Net Δ', 'TPV Δ %'] : []), 'Status'];
+  const parentOf = {}, merchOf = {}; TX.forEach(r => { parentOf[r.m] = r.p; merchOf[r.tr] = r.m; });
+  const statusOf = k => { const key = lv; const lastD = TX.filter(r => r[key] === k && r.ok).reduce((m, r) => r.date > m ? r.date : m, ''); if (!lastD) return ['Never', 'n']; const dd = days(lastD, LAST) - 1; const f0 = first[key][k]; const cmi = +CW[0].slice(0, 4) * 12 + +CW[0].slice(5, 7); if (f0 >= cmi) return ['New', 'g']; return dd > 30 ? ['Dormant', 'c'] : dd > 7 ? ['Idle', 'w'] : ['Active', 'g']; };
+  const trs = rows.map(r => { const st = statusOf(r.k); const pill = el('span', { class: 'pill ' + st[1] }, st[0]); const nd = BW ? r.a.n - r.b.n : null, tg = BW ? growth(r.a.tpv, r.b.tpv) : null;
+    const extra = lv === 'tr' ? [merchOf[r.k]] : lv === 'm' ? [parentOf[r.k]] : [];
+    return { cells: [r.k, ...extra, num(r.a.cnt), money(r.a.tpv), money(r.a.atv, 2), money(r.a.n), pct(tot.n ? r.a.n / tot.n : null), pct(r.a.take, 2), pct(r.a.succ, 0), ...(BW ? [sgn(nd, v => money(v)), tg == null ? (r.a.tpv ? 'new' : '-') : chg(r.a.tpv, r.b.tpv)] : []), pill],
+      raw: [r.k, ...extra, r.a.cnt, r.a.tpv, r.a.atv || 0, r.a.n, r.a.n, r.a.take || 0, r.a.succ || 0, ...(BW ? [nd, tg || 0] : []), st[0]],
+      colors: [null, ...extra.map(() => null), null, null, null, null, null, null, null, ...(BW ? [cls(nd), cls(tg)] : [])], onClick: () => setFilter(lv, r.k) }; });
+  table('mTable', heads, trs, { foot: ['Total', ...(lv !== 'p' ? [''] : []), num(tot.cnt), money(tot.tpv), money(tot.atv, 2), money(tot.n), '100%', pct(tot.take, 2), pct(tot.succ, 0), ...(BW ? [sgn(tot.n - agg(BASE).n, v => money(v)), sgn(growth(tot.tpv, agg(BASE).tpv), v => pct(v, 0))] : []), ''] });
+}
+function mixSec() {
+  const by = $('#xBy').value; const cg = groupBy(CUR, by), bg = groupBy(BASE, by); const tot = agg(CUR);
+  const keys = [...new Set([...cg.keys(), ...bg.keys()])]; const order = [...new Set(TX.map(r => r[by]))].sort();
+  const colorOf = k => SER[order.indexOf(k) % 8];
+  const rows = keys.map(k => ({ k, a: agg(cg.get(k) || []), b: BW ? agg(bg.get(k) || []) : null })).sort((x, y) => y.a.tpv - x.a.tpv || y.a.n - x.a.n);
+  window.__S.mixN = rows.reduce((s, r) => s + r.a.n, 0); window.__S.mixTpv = rows.reduce((s, r) => s + r.a.tpv, 0);
+  hbars('cMixTpv', rows.filter(r => r.a.tpv).map(r => ({ label: r.k, v: tot.tpv ? r.a.tpv / tot.tpv : 0, color: colorOf(r.k), extra: [['TPV', money(r.a.tpv)]] })), { fmt: v => pct(v, 1), name: 'of TPV' });
+  hbars('cMixNet', rows.map(r => ({ label: r.k, v: r.a.n, color: colorOf(r.k), extra: [['take rate', pct(r.a.take, 2)], ['success', pct(r.a.succ, 0)]] })), { fmt: v => money(v), name: 'net revenue' });
+  table('mixTable', ['Item', 'Payments', 'TPV', 'TPV share', 'Withdrawals', 'Net revenue', 'Take rate', 'Success', ...(BW ? ['TPV share Δ (pp)', 'Net Δ'] : [])],
+    rows.map(r => { const sh = tot.tpv ? r.a.tpv / tot.tpv : 0, bt = BW ? agg(BASE).tpv : 0, shb = BW && bt ? r.b.tpv / bt : 0; return { cells: [r.k, num(r.a.cnt), money(r.a.tpv), pct(sh), money(r.a.wd), money(r.a.n), pct(r.a.take, 2), pct(r.a.succ, 0), ...(BW ? [sgn((sh - shb) * 100, v => v.toFixed(1)), sgn(r.a.n - r.b.n, v => money(v))] : [])], raw: [r.k, r.a.cnt, r.a.tpv, sh, r.a.wd, r.a.n, r.a.take || 0, r.a.succ || 0, ...(BW ? [sh - shb, r.a.n - r.b.n] : [])], colors: [null, null, null, null, null, null, null, null, ...(BW ? [cls(sh - shb), cls(r.a.n - r.b.n)] : [])] }; }));
+  const months = [...new Set(SC.map(r => r.mi))].sort((a, b) => a - b); const series = order.filter(k => SC.some(r => r[by] === k && r.ok && r.d === 'D'));
+  const top = series.slice(0, 7), rest = series.slice(7);
+  const sdef = top.map(k => ({ name: k, color: colorOf(k), v: months.map(m => agg(SC.filter(r => r.mi === m && r[by] === k)).tpv) }));
+  if (rest.length) sdef.push({ name: 'Other', color: '--muted', v: months.map(m => agg(SC.filter(r => r.mi === m && rest.includes(r[by]))).tpv) });
+  stacked('cMixTrend', months.map(mlab), sdef, { fmt: v => money(v) });
+}
+function cohorts() {
+  const months = [...new Set(SC.map(r => r.mi))].sort((a, b) => a - b); if (!months.length) return;
+  const maxM = Math.max(...months); const coh = [...new Set(SC.filter(r => r.ok).map(r => first.m[r.m]))].filter(Boolean).sort((a, b) => a - b);
+  if (!coh.length) { ['cRetM', 'cRetT', 'cLayer', 'ramp'].forEach(id => empty(id)); window.__S.layerTpv = 0; return; }
+  const K = Math.min(12, maxM - coh[0] + 1); const colsL = [...Array(K).keys()].map(k => 'M+' + k);
+  const memb = c => [...new Set(SC.filter(r => first.m[r.m] === c).map(r => r.m))];
+  const act = (ms, mi) => new Set(SC.filter(r => r.ok && r.mi === mi && ms.includes(r.m)).map(r => r.m)).size;
+  const Mm = coh.map(c => { const ms = memb(c); return colsL.map((_, k) => c + k > maxM ? null : act(ms, c + k) / ms.length); });
+  heat('cRetM', coh.map(c => `${mlab(c)} (${memb(c).length})`), colsL, Mm, { fmt: v => pct(v, 0), max: 1, min: 0, labels: true, lw: 90, cw: 44, name: 'active' });
+  const Mt = coh.map(c => { const base = agg(SC.filter(r => first.m[r.m] === c && r.mi === c)).tpv; return colsL.map((_, k) => c + k > maxM || !base ? null : agg(SC.filter(r => first.m[r.m] === c && r.mi === c + k)).tpv / base); });
+  heat('cRetT', coh.map(c => mlab(c)), colsL, Mt, { fmt: v => pct(v, 0), labels: true, lw: 90, cw: 44, name: 'of launch-month TPV' });
+  window.__S.layerTpv = coh.reduce((s, c) => s + months.reduce((t, m) => t + agg(SC.filter(r => first.m[r.m] === c && r.mi === m)).tpv, 0), 0);
+  stacked('cLayer', months.map(mlab), coh.map((c, j) => ({ name: 'Vintage ' + mlab(c), color: SER[j % 8], v: months.map(m => agg(SC.filter(r => first.m[r.m] === c && r.mi === m)).tpv) })), { fmt: v => money(v) });
+  const rows = colsL.map((lab, k) => { const reach = coh.filter(c => c + k <= maxM); const ms = reach.flatMap(memb); const rr = SC.filter(r => { const c = first.m[r.m]; return c && c + k === r.mi && reach.includes(c); }); const a = agg(rr); const actv = new Set(rr.filter(r => r.ok).map(r => r.m)).size; return { cells: [lab, num(ms.length), num(actv), pct(ms.length ? actv / ms.length : null, 0), money(ms.length ? a.tpv / ms.length : null), money(ms.length ? a.n / ms.length : null, 2), (actv ? a.cnt / actv : 0).toFixed(1), money(a.atv, 2)] }; });
+  table('ramp', ['Age', 'Merchants reaching', 'Active', 'Survival', 'TPV per launched', 'Net per launched', 'Payments per active', 'Avg ticket'], rows, { sort: false });
+}
+function customers(a, b) {
+  const nc = newCust(SC, CW), nb = BW ? newCust(SC, BW) : null;
+  const pays = new Map(); CUR.forEach(r => { if (r.ok && r.d === 'D' && r.cu) pays.set(r.cu, (pays.get(r.cu) || 0) + 1); });
+  const rep = [...pays.values()].filter(v => v > 1).length;
+  const tiles = [['Unique payers', num(a.ncust), BW ? growth(a.ncust, b.ncust) : null], ['New payers (first ever)', num(nc), BW ? growth(nc, nb) : null], ['Returning payers', num(a.ncust - nc), null], ['Paid more than once', pct(a.ncust ? rep / a.ncust : null, 0), null], ['Payments per payer', a.ncust ? (a.cnt / a.ncust).toFixed(2) : '-', null], ['TPV per payer', money(a.ncust ? a.tpv / a.ncust : null, 2), null]];
+  const h = $('#custTiles'); h.textContent = ''; tiles.forEach(([l, v, g]) => { const c = el('div', { class: 'card tile' }); c.appendChild(el('div', { class: 'lab' }, l)); c.appendChild(el('div', { class: 'val' }, v)); if (g != null) c.appendChild(el('div', { class: 'dl ' + cls(g) }, sgn(g, x => pct(x, 0)) + ' vs comparison')); h.appendChild(c); });
+  const months = [...new Set(SC.map(r => r.mi))].sort((x, y) => x - y);
+  const nr = months.map(m => { const s = new Set(), n = new Set(); SC.forEach(r => { if (r.ok && r.d === 'D' && r.cu && r.mi === m) { s.add(r.cu); if (first.cu[r.cu] === m) n.add(r.cu); } }); return [n.size, s.size - n.size]; });
+  stacked('cCustNR', months.map(mlab), [{ name: 'New', color: '--s1', v: nr.map(x => x[0]) }, { name: 'Returning', color: '--s2', v: nr.map(x => x[1]) }], { fmt: num });
+  window.__S.custUnique = pays.size;
+  const bins = [['1', 1, 1], ['2', 2, 2], ['3', 3, 3], ['4-5', 4, 5], ['6-10', 6, 10], ['11+', 11, 1e9]];
+  columns('cFreq', bins.map(([l, lo, hi]) => ({ label: l + ' payment' + (l === '1' ? '' : 's'), v: [...pays.values()].filter(v => v >= lo && v <= hi).length })), { fmt: num, name: 'payers', h: 200 });
+  const coh = [...new Set(Object.values(first.cu))].sort((x, y) => x - y).filter(c => SC.some(r => r.ok && r.d === 'D' && r.cu && first.cu[r.cu] === c)); const maxM = Math.max(...months); const K = coh.length ? Math.max(1, Math.min(12, maxM - coh[0] + 1)) : 0;
+  const Mc = coh.map(c => { const mem = new Set(SC.filter(r => r.ok && r.d === 'D' && r.cu && first.cu[r.cu] === c).map(r => r.cu)); return [...Array(K).keys()].map(k => c + k > maxM ? null : new Set(SC.filter(r => r.ok && r.d === 'D' && r.mi === c + k && mem.has(r.cu)).map(r => r.cu)).size / (mem.size || 1)); });
+  if (!K) empty('cRetC'); else heat('cRetC', coh.map(c => mlab(c)), [...Array(K).keys()].map(k => 'M+' + k), Mc, { fmt: v => pct(v, 0), labels: true, max: 1, min: 0, lw: 70, cw: 44, name: 'paid again' });
+  const ct = new Map(); CUR.forEach(r => { if (r.ok && r.d === 'D' && r.cu) { const x = ct.get(r.cu) || { n: 0, v: 0, m: new Set() }; x.n++; x.v += cv(r.a, r); x.m.add(r.m); ct.set(r.cu, x); } });
+  table('custTop', ['Customer (masked)', 'Payments', 'TPV', 'Merchants used'], [...ct.entries()].sort((x, y) => y[1].v - x[1].v).slice(0, 25).map(([k, x]) => ({ cells: ['•••' + k.slice(-4), num(x.n), money(x.v), String(x.m.size)], raw: [k, x.n, x.v, x.m.size] })));
+}
+function ops() {
+  const by = S.sBy; const g = groupBy(CUR, by);
+  const items = [...g.entries()].map(([k, rows]) => { const a = agg(rows); return { label: k, v: a.succ, extra: [['attempts', num(a.att)], ['failed', num(a.fail)], ['pending', num(a.pend)]], att: a.att }; }).filter(i => i.att > 0).sort((x, y) => y.att - x.att).slice(0, 15);
+  hbars('cSuccBy', items, { fmt: v => pct(v, 0), name: 'success rate' });
+  const rg = groupBy(CUR.filter(r => r.g === 'Rejected'), 'rs'); const totF = CUR.filter(r => r.g === 'Rejected').length;
+  hbars('cReasons', [...rg.entries()].map(([k, rows]) => ({ label: k, v: rows.length, extra: [['share', pct(totF ? rows.length / totF : 0, 0)], ['lost TPV (deposits)', money(rows.filter(r => r.d === 'D').reduce((s, r) => s + cv(r.a, r), 0))]] })).sort((x, y) => y.v - x.v), { fmt: num, name: 'failed attempts', color: '--s8' });
+  const W7 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; const M = [...Array(24)].map(() => Array(7).fill(0));
+  CUR.forEach(r => { if (r.ok && r.d === 'D') M[r.hour][r.wd] += S.hMetric === 'cnt' ? 1 : cv(r.a, r); });
+  window.__S.heatSum = M.flat().reduce((s, v) => s + v, 0); window.__S.reasonsSum = totF;
+  heat('cHeat', [...Array(24).keys()].map(h => String(h).padStart(2, '0') + ':00'), W7, M, { fmt: S.hMetric === 'cnt' ? num : v => money(v), cw: 46, ch: 14, lw: 50, name: S.hMetric === 'cnt' ? 'payments' : 'TPV' });
+  const bands = RAW.bands; const lab = i => i === bands.length - 1 ? bands[i].toLocaleString() + '+' : bands[i].toLocaleString() + '-' + (bands[i + 1] - 1).toLocaleString();
+  const tb = bands.map((_, i) => ({ i, rows: CUR.filter(r => r.d === 'D' && r.a >= bands[i] && (i === bands.length - 1 || r.a < bands[i + 1])) }));
+  window.__S.ticketCnt = tb.reduce((s, x) => s + x.rows.filter(r => r.ok).length, 0);
+  columns('cTicket', tb.map(x => ({ label: lab(x.i), v: x.rows.filter(r => r.ok).length })), { fmt: num, name: 'payments', h: 200 });
+  table('ticketTable', ['Band (ZMW)', 'Payments', 'TPV', 'Net revenue', 'Take rate', 'Success'], tb.map(x => { const a = agg(x.rows); return { cells: [lab(x.i), num(a.cnt), money(a.tpv), money(a.n, 2), pct(a.take, 2), pct(a.succ, 0)], raw: [x.i, a.cnt, a.tpv, a.n, a.take || 0, a.succ || 0], colors: [null, null, null, cls(a.n), null, null] }; }));
+  // terminal health
+  const terms = [...new Set(SC.map(r => r.tr))]; const st = { Active: 0, Idle: 0, Dormant: 0, Never: 0 };
+  const rows = terms.map(t => { const lp = lastPay[t]; const dd = lp ? days(lp, LAST) - 1 : null; const s = dd == null ? 'Never' : dd > 30 ? 'Dormant' : dd > 7 ? 'Idle' : 'Active'; st[s]++; const a = agg(CUR.filter(r => r.tr === t)); return { t, s, dd, lp, a }; }).sort((x, y) => (x.dd == null ? 1e9 : x.dd) - (y.dd == null ? 1e9 : y.dd));
+  window.__S.health = st;
+  $('#healthNote').textContent = `Days since the last successful payment, as at ${dlab(LAST)}. Active ≤ 7 days, idle 8-30, dormant > 30.`;
+  const ht = $('#healthTiles'); ht.textContent = ''; [['Active', 'g'], ['Idle', 'w'], ['Dormant', 'c'], ['Never', 'n']].forEach(([k, c]) => { const d = el('div', { class: 'card tile' }); const lb = el('div', { class: 'lab' }); lb.appendChild(el('span', { class: 'pill ' + c }, k)); d.appendChild(lb); d.appendChild(el('div', { class: 'val' }, num(st[k]))); ht.appendChild(d); });
+  const merchOf = {}; TX.forEach(r => merchOf[r.tr] = r.m);
+  table('healthTable', ['Terminal', 'Merchant', 'Health', 'Last payment', 'Days since', 'Payments (period)', 'TPV (period)'], rows.map(x => ({ cells: [x.t, merchOf[x.t], el('span', { class: 'pill ' + { Active: 'g', Idle: 'w', Dormant: 'c', Never: 'n' }[x.s] }, x.s), x.lp ? dlab(x.lp) : '-', x.dd == null ? '-' : String(x.dd), num(x.a.cnt), money(x.a.tpv)], raw: [x.t, merchOf[x.t], x.s, x.lp || '', x.dd == null ? 1e9 : x.dd, x.a.cnt, x.a.tpv] })));
+}
+// ------------------------------------------------------------------ fee calculator
+const K_ = id => { const v = parseFloat($('#' + id).value); return isNaN(v) ? 0 : v; };
+function initCalc() {
+  const ts = $('#kType'); RAW.types.forEach(t => ts.appendChild(el('option', { value: t }, t))); ts.value = RAW.types.includes('HoReCa - bars & restaurant') ? 'HoReCa - bars & restaurant' : RAW.types[0];
+  const host = $('#kCosts'); RAW.chans.forEach((c, i) => { const l = el('label'); l.appendChild(document.createTextNode(c.ch)); const inp = el('input', { type: 'number', step: '0.1', id: 'kc' + i }); inp.value = c.cost; l.appendChild(inp); host.appendChild(l); });
+  document.querySelectorAll('.calc input, .calc select').forEach(x => x.addEventListener('input', calc));
+  $('#kBench').addEventListener('click', () => { const b = bench(); if (!b) return; $('#kTicket').value = Math.round(b.atvL); $('#kSucc').value = Math.round(b.succ * 100); $('#kQr').value = Math.round(b.qr * 100); $('#kAir').value = Math.round(b.air * 100); $('#kMtn').value = Math.round(b.mtn * 100); calc(); });
+}
+function bench(type) {
+  type = type || $('#kType').value; const from = addDays(LAST, -89);
+  const rows = TX.filter(r => r.date >= from && (type === '*' || r.mt === type)); const ok = rows.filter(r => r.ok && r.d === 'D'); if (!ok.length) return null;
+  const tpvL = ok.reduce((s, r) => s + r.a, 0), n = ok.length, att = rows.filter(r => r.d === 'D').length;
+  const mer = new Set(ok.map(r => r.m)).size, months = Math.max(1, days(from, LAST) / 30.4);
+  return { atvL: tpvL / n, succ: n / att, qr: ok.filter(r => r.me === 'QR').length / n, air: ok.filter(r => r.pr === 'Airtel').length / n, mtn: ok.filter(r => r.pr === 'MTN').length / n,
+    take: ok.reduce((s, r) => s + r.n, 0) / tpvL, fee: ok.reduce((s, r) => s + r.f, 0) / tpvL, bonus: ok.reduce((s, r) => s + r.b, 0) / tpvL, costTx: ok.reduce((s, r) => s + r.c, 0) / n, tpvMer: tpvL / mer / months, mer };
+}
+function calc() {
+  $('#kPush').value = Math.max(0, 100 - K_('kQr')); $('#kZam').value = Math.max(0, 100 - K_('kAir') - K_('kMtn'));
+  const tpv = K_('kTpv'), tk = K_('kTicket'), term = K_('kTerm'), su = K_('kSucc') / 100, fee = (K_('kFee') + K_('kMf')) / 100, bon = K_('kBonus') / 100;
+  const mq = K_('kQr') / 100, mp = 1 - mq, pa = K_('kAir') / 100, pm = K_('kMtn') / 100, pz = Math.max(0, 1 - pa - pm);
+  const cost = name => { const i = RAW.chans.findIndex(c => c.ch === name); return i < 0 ? 0 : K_('kc' + i); };
+  const costp = name => { const c = RAW.chans.find(c => c.ch === name); return c ? c.costp : 0; };
+  let wcost = 0, wcostp = 0; const provs = [['Airtel', pa], ['MTN', pm], ['Zamtel', pz]];
+  provs.forEach(([p, sh]) => [['QR', mq], ['Push (USSD)', mp]].forEach(([m, sm]) => { wcost += sh * sm * cost(p + ' ' + m); wcostp += sh * sm * costp(p + ' ' + m); }));
+  const n = tk ? tpv / tk : 0, att = su ? n / su : 0, fees = tpv * fee, pc = n * wcost + tpv * wcostp;
+  const wn = K_('kWn'), wa = K_('kWa'), wf = K_('kWf') / 100, wb = K_('kWb') / 100, wcostTx = provs.reduce((s, [p, sh]) => s + sh * cost(p + ' Direct'), 0);
+  const wfees = wn * wa * wf, wpc = wn * wcostTx, wbon = wn * wa * wb;
+  const bonus = tpv * bon + wbon, net = fees + wfees - pc - wpc - bonus;
+  const z = RAW.meta.zoyk || 1, fx = rate(+Object.keys(RAW.fxall).map(Number).filter(k => k <= (+LAST.slice(0, 4) * 12 + +LAST.slice(5, 7))).sort((a, b) => b - a)[0], 'ZMW');
+  const K = v => 'ZMW ' + Math.round(v).toLocaleString('en-US'), K2 = v => 'ZMW ' + v.toFixed(2);
+  table('kPl', ['Line', 'Per month', 'Per payment'], [
+    ['Payments', Math.round(n).toLocaleString(), ''], ['Attempts needed', Math.round(att).toLocaleString(), ''], ['TPV', K(tpv), K2(tk)],
+    ['Fees paid (merchant + customer)', K(fees + wfees), K2(n ? fees / n : 0)], ['   of which merchant fees', K(tpv * K_('kMf') / 100 + wfees), ''], ['Provider cost - payments', '(' + K(pc) + ')', '(' + K2(n ? pc / n : 0) + ')'], ['Provider cost - withdrawals', '(' + K(wpc) + ')', ''],
+    ['Agent rebate', '(' + K(bonus) + ')', '(' + K2(n ? tpv * bon / n : 0) + ')'], ['Partner net revenue', K(net), K2(n ? net / n : 0)],
+    ['Take rate', pct(tpv ? net / tpv : null, 2), ''], ['Net per terminal', K(term ? net / term : 0), ''], ['Annual net revenue', K(net * 12 * z), ''], ['Annual net revenue (USD)', '$' + Math.round(net * 12 * z / (fx || 1)).toLocaleString(), '']
+  ].map((r, i) => ({ cells: r, cls: [8].includes(i) ? 'tot' : '' })), { sort: false });
+  const margin = fee - bon - wcostp; const be = margin > 0 ? wcost / margin : null; const maxB = tk ? fee - wcostp - wcost / tk : null;
+  const box = $('#kBe'); box.textContent = '';
+  const m1 = el('div', { class: 'warnbox' + (be != null && tk >= be ? ' okbox' : '') }); m1.textContent = be == null ? 'Fees do not cover the agent rebate: every payment loses money.' : `Break-even ticket ZMW ${be.toFixed(2)} - payments below this lose money at these fees and rebate. Your average ticket is ZMW ${tk.toFixed(0)}.`; box.appendChild(m1);
+  const m2 = el('div', { class: 'warnbox okbox' }); m2.textContent = `Maximum agent rebate at this ticket before net turns negative: ${pct(maxB, 2)}.`; box.appendChild(m2);
+  // sensitivity
+  const fs = [1.5, 1.75, 2.0, 2.25, 2.4, 2.5, 2.75, 3.0], bs = [0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5];
+  heat('kSens', fs.map(f => f.toFixed(2) + '%'), bs.map(b => b.toFixed(2) + '%'), fs.map(f => bs.map(b => tk ? f / 100 - b / 100 - wcostp - wcost / tk : null)), { fmt: v => pct(v, 2), labels: true, lw: 60, cw: 62, ch: 24, name: 'take rate' });
+  const tks = [5, 10, 25, 50, 100, 250, 500, 1000, 2500];
+  columns('cKTicket', tks.map(t => ({ label: 'ZMW ' + t.toLocaleString(), v: t * (fee - bon - wcostp) - wcost, color: (t * (fee - bon - wcostp) - wcost) < 0 ? '--crit' : '--s1' })), { fmt: v => 'ZMW ' + v.toFixed(2), afmt: v => v.toFixed(2), name: 'net per payment', h: 220 });
+  const bt = bench(), ba = bench('*');
+  table('kBenchT', ['Metric', $('#kType').value, 'All merchants'], [['Average ticket', bt ? K2(bt.atvL) : '-', ba ? K2(ba.atvL) : '-'], ['Fee rate (merchant + customer)', bt ? pct(bt.fee, 2) : '-', ba ? pct(ba.fee, 2) : '-'], ['Agent rebate rate', bt ? pct(bt.bonus, 2) : '-', ba ? pct(ba.bonus, 2) : '-'],
+    ['Provider cost per payment', bt ? K2(bt.costTx) : '-', ba ? K2(ba.costTx) : '-'], ['Take rate', bt ? pct(bt.take, 2) : '-', ba ? pct(ba.take, 2) : '-'], ['Success rate', bt ? pct(bt.succ, 0) : '-', ba ? pct(ba.succ, 0) : '-'],
+    ['QR share', bt ? pct(bt.qr, 0) : '-', ba ? pct(ba.qr, 0) : '-'], ['Merchants', bt ? String(bt.mer) : '-', ba ? String(ba.mer) : '-'], ['TPV per merchant per month', bt ? K(bt.tpvMer) : '-', ba ? K(ba.tpvMer) : '-']].map(r => ({ cells: r })), { sort: false });
+}
+function fxCard() {
+  const months = [...new Set(TX.map(r => r.mi))].sort((a, b) => a - b); const ccys = [...new Set(TX.map(r => r.ccy))].sort();
+  const cwi = [+CW[0].slice(0, 4) * 12 + +CW[0].slice(5, 7), +CW[1].slice(0, 4) * 12 + +CW[1].slice(5, 7)];
+  const bwi = BW ? [+BW[0].slice(0, 4) * 12 + +BW[0].slice(5, 7), +BW[1].slice(0, 4) * 12 + +BW[1].slice(5, 7)] : null;
+  $('#fxNote').textContent = `Reporting currency ${S.ccy}. Each transaction converts at its month's average rate (FX tab of the workbook): amount / (transaction currency per USD) x (${S.ccy} per USD). For ZMW transactions in ZMW the rate is 1. Closing rates are used only for balances in the workbook.`;
+  const rows = []; months.forEach(mi => ccys.forEach(c => { const avg = rate(mi, c), z = rate(mi, 'ZMW'), cl = (RAW.fxclose[mi] || {})[c], used = fxOf(mi, c);
+    const inUse = (mi >= cwi[0] && mi <= cwi[1]) ? 'selected period' : (bwi && mi >= bwi[0] && mi <= bwi[1]) ? 'comparison' : '';
+    const own = RAW.fxall[mi], src = own ? null : Object.keys(RAW.fxall).map(Number).filter(k => k <= mi).sort((a, b) => b - a)[0], cf = src ? ` (carried fwd from ${mlab(src)})` : '';
+    rows.push({ cells: [mlab(mi), c, avg == null ? 'missing' : avg.toFixed(4) + (c === 'USD' ? '' : cf), z == null ? 'missing' : z.toFixed(4) + cf, cl == null ? '-' : cl.toFixed(4), `1 ${c} = ${(1 / used).toFixed(6)} ${S.ccy}`, String(TX.filter(r => r.mi === mi && r.ccy === c).length), inUse ? el('span', { class: 'pill ' + (inUse === 'selected period' ? 'g' : 'n') }, inUse) : ''], raw: [mi, c, avg || 0, z || 0, cl || 0, used, 0, inUse] }); }));
+  table('fxTable', ['Month', 'Transaction currency', 'Avg rate (per USD)', 'ZMW per USD (avg)', 'Closing rate (per USD)', `Rate applied to ${S.ccy}`, 'Transactions', 'Used in'], rows);
+  const cfm = months.filter(mi => !RAW.fxall[mi] && Object.keys(RAW.fxall).some(k => +k < mi)); if (cfm.length) { const d = el('div', { class: 'warnbox' }); d.textContent = `Average rate not yet entered for ${cfm.map(mlab).join(', ')} - the latest available month's rate is carried forward (same rule as the workbook FX tab, columns AA:AJ). Enter the month's rate on the FX tab to finalise.`; $('#fxTable').prepend(d); }
+  if (FXMISS.size) { const d = el('div', { class: 'warnbox' }); d.textContent = 'Missing FX rate for: ' + [...FXMISS].join(', ') + ' - converted at 1. Add the rate on the workbook FX tab.'; $('#fxTable').prepend(d); }
+}
+function dq() {
+  const h = $('#dq'); h.textContent = ''; const m = RAW.meta;
+  const add = (txt, ok) => { const d = el('div', { class: 'warnbox' + (ok ? ' okbox' : '') }); d.textContent = txt; h.appendChild(d); };
+  add(`Snapshot built ${m.built} from 05. Revenue_analysis_POS.xlsx: ${TX.length.toLocaleString()} Backoffice transactions, last one on ${dlab(LAST)} ${LAST.slice(0, 4)}.`, true);
+  add(`Workbook Control checks: ${m.checks} passing.`, m.checks && m.checks.startsWith(m.checks.split(' of ')[1]));
+  if (m.asof < m.lastTxn) add(`Control as-of date (${m.asof}) is earlier than the last transaction (${m.lastTxn}) - update Control B6.`);
+  if (m.missing.length) add(`${m.missing.length} Backoffice combination(s) are not yet in the workbook's Data tab: ` + m.missing.map(x => `${x[4]} / ${x[5]} / ${x[6]} / ${x[7]}`).join('; ') + '. This dashboard reads transactions directly, so they are included here.');
+  const multi = Object.entries(termOf).filter(([, s]) => s.size > 1); if (multi.length) add(`Terminal mapped to more than one merchant: ` + multi.map(([t, s]) => `${t} → ${[...s].join(', ')}`).join('; ') + '. Confirm the hierarchy in Terminal_master.');
+  const tbd = [...new Set(TX.filter(r => r.mt === 'TBD').map(r => r.m))].sort(); if (tbd.length) add(`Merchant type still TBD for ${tbd.length} merchant(s): ${tbd.join(', ')}. They appear as 'TBD' in the merchant-type filter and mix.`);
+  const unm = [...new Set(TX.filter(r => r.mt === 'Unmapped').map(r => r.m))]; if (unm.length) add(`Merchants not yet on Merchant_master (type shown as Unmapped): ${unm.join(', ')}.`);
+  const pend = TX.filter(r => r.g === 'In progress').length; if (pend) add(`${pend} transaction(s) still 'In progress' - counted as attempts, not as success or failure.`);
+  if (m.hblank) add(`${m.hblank} successful transaction(s) have a blank Partner net revenue in the Backoffice export (col H) - taken as merchant fee + customer fee - provider cost - agent rebate, as in the workbook.`);
+  if (m.feeOverAmt) add(`${m.feeOverAmt} successful payment(s) carry a merchant fee larger than the payment amount (1 ZMW test-size payments with a 2.5 ZMW fee) - confirm with Backoffice.`);
+  const cash = TX.filter(r => r.me === 'Cash').length; if (cash) add(`${cash} 'Cash Payout' transaction(s) (status 'Payment to local payment provider') are shown as payment method / provider 'Cash' and counted as pending.`);
+  table('defs', ['Term', 'Meaning'], [['TPV', 'Total Payment Volume: successful customer payments to merchants (deposits). Withdrawals excluded.'], ['Fees paid', 'Merchant fee (charged to the merchant) + customer fee (paid on top by the customer, or taken from the amount when the Backoffice mode is From amount).'],
+    ['Provider cost', 'MNO / bank cost per transaction as exported by Backoffice (actual).'], ['Agent rebate', 'Rebate paid back to the agent (merchant), formerly merchant bonus.'], ['Partner net revenue', 'Fees paid - provider cost - agent rebate = Backoffice Partner net revenue. Shown as Net revenue throughout. 100% Zoyk.'],
+    ['Take rate', 'Net revenue / TPV.'], ['Success rate', 'Successful transactions / all attempts. Pending = In progress.'], ['Active terminal', 'At least one successful transaction in the period.'],
+    ['Unique payer', 'Distinct wallet (last 9 digits of the Backoffice account) with a successful payment.'], ['Prior period', 'Calendar-aligned for month / quarter / year presets (e.g. 1-28 Oct vs 1-28 Sep); equal length before for day ranges.'],
+    ['Currency', 'Switch ZMW / USD at the top. Conversion at each month\'s average rate via USD (cross rate): amount / (transaction currency per USD) x (reporting currency per USD). Rates are listed below.']].map(r => ({ cells: r })), { sort: false });
+  $('#defs').classList.add('txt');
+  fxCard();
+  $('#foot').textContent = 'Zoyk Pay POS dashboard · static snapshot of the workbook data · all calculations run in the browser, nothing is sent anywhere.';
+}
+
+// ------------------------------------------------------------------ wiring
+function setFilter(k, v) { const map = { p: 'fParent', m: 'fMerchant', tr: 'fTerminal' }; F[k] = v; fillDims(); $('#' + map[k]).value = v; render(); }
+function applyPreset() { const p = PRESETS.find(x => x[0] === S.preset); if (p && p[2]) { const [f, t] = p[2](); S.from = f; S.to = t; $('#fFrom').value = f; $('#fTo').value = t; } }
+function seg(id, cb) { document.querySelectorAll('#' + id + ' button').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('#' + id + ' button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); })); }
+function init() {
+  const ps = $('#fPreset'); PRESETS.forEach(p => ps.appendChild(el('option', { value: p[0] }, p[1]))); ps.value = S.preset; applyPreset();
+  ps.addEventListener('change', () => { S.preset = ps.value; applyPreset(); render(); });
+  const setM = (which) => { const v = $(which === 'f' ? '#fFrom' : '#fTo').value; if (!v) return; S.preset = 'custom'; ps.value = 'custom';
+    if (which === 'f') { S.from = v; if (S.to < v) S.to = v; } else { S.to = v; if (S.from > v) S.from = v; } $('#fFrom').value = S.from; $('#fTo').value = S.to; render(); };
+  $('#fFrom').addEventListener('change', () => setM('f')); $('#fTo').addEventListener('change', () => setM('t'));
+  const cs = $('#fCmp'); CMP_OPTS.forEach(([v, l]) => cs.appendChild(el('option', { value: v }, l))); cs.value = S.cmp;
+  cs.addEventListener('change', e => { S.cmp = e.target.value; if (S.cmp === 'custom' && !(S.cfrom && S.cto)) { const b = BW || [addDays(S.from, -days(S.from, S.to)), addDays(S.from, -1)]; S.cfrom = b[0]; S.cto = b[1]; } render(); });
+  const setC = (which) => { const v = $(which === 'f' ? '#fCFrom' : '#fCTo').value; if (!v) return; if (S.cmp !== 'custom') { const w = BW || [v, v]; S.cfrom = w[0]; S.cto = w[1]; }
+    S.cmp = 'custom'; cs.value = 'custom'; if (which === 'f') { S.cfrom = v; if (!S.cto || S.cto < v) S.cto = v; } else { S.cto = v; if (!S.cfrom || S.cfrom > v) S.cfrom = v; } render(); };
+  $('#fCFrom').addEventListener('change', () => setC('f')); $('#fCTo').addEventListener('change', () => setC('t'));
+  seg('fCcy', v => { S.ccy = v; render(); });
+  seg('gran', v => { S.gran = v; trends(); });
+  seg('sBy', v => { S.sBy = v; ops(); });
+  seg('hMetric', v => { S.hMetric = v; ops(); });
+  seg('theme', v => { if (v === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', v); try { localStorage.setItem('zoykTheme', v); } catch (e) {} render(); });
+  try { const t = localStorage.getItem('zoykTheme'); if (t && t !== 'auto') { document.documentElement.setAttribute('data-theme', t); document.querySelectorAll('#theme button').forEach(b => b.classList.toggle('on', b.dataset.v === t)); } } catch (e) {}
+  DIMS.forEach(([id, k]) => $('#' + id).addEventListener('change', e => { F[k] = e.target.value; fillDims(); render(); }));
+  $('#fReset').addEventListener('click', () => { for (const k in F) F[k] = ''; fillDims(); render(); });
+  ['bType', 'bMetric'].forEach(id => $('#' + id).addEventListener('change', bridge));
+  ['mLevel', 'mRank'].forEach(id => $('#' + id).addEventListener('change', merchants));
+  $('#xBy').addEventListener('change', mixSec);
+  initCalc(); fillDims(); render();
+  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => showPage(PAGE, false), 200); });
+  document.querySelectorAll('nav a').forEach(a => a.addEventListener('click', e => { e.preventDefault(); showPage(a.getAttribute('href').slice(1)); }));
+  addEventListener('hashchange', () => showPage(location.hash.slice(1), false));
+  showPage((location.hash || '#overview').slice(1), false);
+  addEventListener('load', () => setTimeout(() => window.scrollTo(0, 0), 0));
+  $('#sideAsOf').textContent = 'Data to ' + dlab(LAST) + ' ' + LAST.slice(0, 4);
+}
+init();
+</script>
+</body>
+</html>
