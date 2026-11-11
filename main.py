@@ -430,15 +430,15 @@ def run_pipeline(
         if dry_run:
             logger.info("[DRY RUN] All checks passed! Skipping atomic commit to production.")
             checks_passed.append("dry_run_commit_bypassed")
-            copy_mgr.cleanup_working_copy()
-            logger.info(f"Deleted working copy: {working_copy_path}")
+            for deleted_path in copy_mgr.cleanup_working_copy():
+                logger.info(f"Deleted working copy: {deleted_path}")
         else:
             logger.info("Executing atomic commit to replace production workbook...")
             copy_mgr.commit()
             checks_passed.append("atomic_commit_successful")
             logger.info("Production workbook updated successfully.")
-            copy_mgr.cleanup_working_copy()
-            logger.info(f"Deleted working copy: {working_copy_path}")
+            for deleted_path in copy_mgr.cleanup_working_copy():
+                logger.info(f"Deleted working copy: {deleted_path}")
 
             project_root = os.path.dirname(os.path.abspath(__file__))
             dashboard_template_path = config["paths"].get(

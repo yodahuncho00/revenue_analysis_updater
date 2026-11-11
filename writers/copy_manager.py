@@ -35,6 +35,7 @@ class CopyManager:
             f"{os.path.splitext(os.path.basename(self.prod_path))[0]}"
             f"_{run_suffix}.working.xlsx",
         )
+        self.legacy_working_copy_path = f"{self.prod_path}.working.xlsx"
         self.is_locked = False
         self._mutex_handle = None
         self._lock_fd = None
@@ -231,29 +232,38 @@ class CopyManager:
         # Atomic replace
         os.replace(temp_target, self.prod_path)
 
-    def cleanup_working_copy(self) -> None:
-        """Delete this run's working workbook, retrying brief Windows file locks."""
-        if not os.path.exists(self.working_copy_path):
-            return
+    def cleanup_working_copy(self) -> list[str]:
+        """Delete this run's and any legacy project-folder working copies."""
+        deleted_paths = []
+        paths = dict.fromkeys(
+            (self.working_copy_path, self.legacy_working_copy_path)
+        )
+        failures = []
+        for path in paths:
+            if not os.path.exists(path):
+                continue
+            last_error = None
+            for attempt in range(8):
+                try:
+                    os.remove(path)
+                    deleted_paths.append(path)
+                    break
+                except FileNotFoundError:
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    if attempt < 7:
+                        import time
 
-        last_error = None
-        for attempt in range(8):
-            try:
-                os.remove(self.working_copy_path)
-                return
-            except FileNotFoundError:
-                return
-            except OSError as exc:
-                last_error = exc
-                if attempt < 7:
-                    import time
-
-                    time.sleep(0.5)
-
-        raise CopyManagerError(
-            f"Could not delete the successful run's working workbook: "
-            f"{self.working_copy_path} ({last_error})"
-        ) from last_error
+                        time.sleep(0.5)
+            else:
+                failures.append((path, last_error))
+        if failures:
+            details = "; ".join(f"{path} ({error})" for path, error in failures)
+            raise CopyManagerError(
+                f"Could not delete successful-run working workbook(s): {details}"
+            ) from failures[0][1]
+        return deleted_paths
 
     def cleanup_on_failure(self) -> None:
         """On failure, leaves the working copy intact for debugging, but releases the run lock."""

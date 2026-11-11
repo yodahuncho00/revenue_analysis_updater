@@ -7,8 +7,8 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 $Message = Get-Content -LiteralPath $AlertFile -Raw
 if ($Message -notmatch "TEST ALERT ONLY") {
-    if ($Message -match "(?i)PRE-FLIGHT LOGIN FAILED") {
-        $Message += "`r`nThe daily ETL was stopped before it started. Complete Backoffice login/OTP in the browser, then run scripts\run_daily_etl.bat again."
+    if ($Message -match "(?i)PRE-FLIGHT FAILED") {
+        $Message += "`r`nThe daily ETL was stopped before it started. Check data\logs\scheduler.log for the exact preflight error. If Python is missing, rerun scripts\install_windows.ps1 from the project folder. If login/OTP is required, complete it in Chromium and rerun scripts\run_daily_etl.bat."
     } elseif ($RunReport -and (Test-Path -LiteralPath $RunReport)) {
         try {
             $Report = Get-Content -LiteralPath $RunReport -Raw | ConvertFrom-Json
