@@ -254,15 +254,13 @@ class PlaywrightExtractor(BaseExtractor):
         page: Any, from_value: str, to_value: str, page_name: str
     ) -> None:
         """Set both reactive Quasar date fields in one DOM turn to avoid rerenders."""
-        from_input = page.get_by_role("textbox", name="From", exact=True)
-        to_input = page.get_by_role("textbox", name="To", exact=True)
+        from_input = page.locator('input[aria-label="From"]:visible')
+        to_input = page.locator('input[aria-label="To"]:visible')
         if from_input.count() != 1 or to_input.count() != 1:
             raise PlaywrightExtractionError(
-                f"{page_name} date menu did not expose exactly one From and To field. "
+                f"{page_name} date menu did not expose exactly one visible From and To input. "
                 f"{PlaywrightExtractor._date_picker_diagnostics(page)}"
             )
-        from_input.wait_for(state="visible", timeout=10000)
-        to_input.wait_for(state="visible", timeout=10000)
         page.evaluate(
             """({fromValue, toValue}) => {
                 const visibleByLabel = label => Array.from(
@@ -286,6 +284,54 @@ class PlaywrightExtractor(BaseExtractor):
                 return [from[0].value, to[0].value];
             }""",
             {"fromValue": from_value, "toValue": to_value},
+        )
+
+    @classmethod
+    def _set_transaction_date_range(
+        cls, page: Any, date_filter: Any, from_date: date, to_date: date, page_name: str
+    ) -> None:
+        """Set a transaction date filter using its visible fields or calendar."""
+        date_filter.click()
+        from_input = page.locator('input[aria-label="From"]:visible')
+        to_input = page.locator('input[aria-label="To"]:visible')
+        if (
+            from_input.count() == 1
+            and to_input.count() == 1
+        ):
+            cls._set_date_range_text_inputs(
+                page,
+                f"{from_date:%Y-%m-%d} 00:00:00",
+                f"{to_date:%Y-%m-%d} 23:59:59",
+                page_name,
+            )
+            return
+
+        calendar = page.locator(".q-date:visible").last
+        if calendar.count():
+            cls._prepare_open_calendar_date_range(page, from_date, to_date)
+            cls._select_calendar_end_date(page, date_filter, to_date)
+            return
+
+        raise PlaywrightExtractionError(
+            f"{page_name} date filter exposed neither visible From/To fields "
+            f"nor a calendar. {cls._date_picker_diagnostics(page)}"
+        )
+
+    @staticmethod
+    def _click_apply_filter(page: Any) -> None:
+        """Click the visible Apply button without Playwright's stability wait."""
+        page.evaluate(
+            """() => {
+                const buttons = Array.from(document.querySelectorAll("button"))
+                    .filter(button => button.getClientRects().length > 0
+                        && button.innerText.trim() === "Apply");
+                if (buttons.length !== 1) {
+                    throw new Error(
+                        `Expected one visible Apply button; found ${buttons.length}.`
+                    );
+                }
+                buttons[0].click();
+            }"""
         )
 
     @staticmethod
@@ -381,6 +427,12 @@ class PlaywrightExtractor(BaseExtractor):
         cls, page: Any, date_filter: Any, from_date: date, to_date: date
     ) -> None:
         date_filter.click()
+        cls._prepare_open_calendar_date_range(page, from_date, to_date)
+
+    @classmethod
+    def _prepare_open_calendar_date_range(
+        cls, page: Any, from_date: date, to_date: date
+    ) -> None:
         try:
             page.locator(".q-date:visible").last.wait_for(
                 state="visible", timeout=10000
@@ -1281,9 +1333,6 @@ class PlaywrightExtractor(BaseExtractor):
                 "lt": f"{to_date:%Y-%m-%d} 23:59:59.999",
             }
         }
-        from_str = f"{from_date:%Y-%m-%d} 00:00:00"
-        to_str = f"{to_date:%Y-%m-%d} 23:59:59"
-
         with sync_playwright() as playwright:
             with self._authenticated_page(playwright, url) as page:
                 reset = page.get_by_role(
@@ -1294,9 +1343,8 @@ class PlaywrightExtractor(BaseExtractor):
                 date_filter = page.get_by_role(
                     "button", name=re.compile(r"^Date\b", re.IGNORECASE)
                 ).first
-                date_filter.click()
-                self._set_date_range_text_inputs(
-                    page, from_str, to_str, capture_name.title()
+                self._set_transaction_date_range(
+                    page, date_filter, from_date, to_date, capture_name.title()
                 )
                 timeout = self.bo_cfg.get("browser", {}).get(
                     "transaction_response_timeout_ms", 120000
@@ -1306,7 +1354,7 @@ class PlaywrightExtractor(BaseExtractor):
                         lambda response: urlparse(response.url).path == route_path,
                         timeout=timeout,
                     ) as response_info:
-                        page.get_by_role("button", name="Apply", exact=True).click()
+                        self._click_apply_filter(page)
                 except Exception as exc:
                     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 

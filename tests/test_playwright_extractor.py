@@ -1,8 +1,140 @@
 import json
+from datetime import date
 
 import pytest
 
 from extractors.playwright_extractor import PlaywrightExtractionError, PlaywrightExtractor
+
+
+def test_transaction_date_range_uses_calendar_when_to_textbox_is_hidden(monkeypatch):
+    start = date(2026, 11, 1)
+    end = date(2026, 11, 11)
+    events = []
+
+    class Locator:
+        last = None
+
+        def __init__(self, visible=False, count=1):
+            self.visible = visible
+            self._count = count
+            self.last = self
+
+        def count(self):
+            return self._count
+
+        def is_visible(self):
+            return self.visible
+
+        def wait_for(self, **_kwargs):
+            pass
+
+    class Page:
+        def get_by_role(self, *_args, **_kwargs):
+            return Locator(visible=False)
+
+        def locator(self, selector):
+            if selector == ".q-date:visible":
+                return Locator(count=1)
+            if selector == "input[type='time']:visible":
+                return Locator(count=0)
+            if selector in (
+                'input[aria-label="From"]:visible',
+                'input[aria-label="To"]:visible',
+            ):
+                return Locator(count=0)
+            raise AssertionError(f"Unexpected selector: {selector}")
+
+    class DateFilter:
+        def click(self):
+            events.append("toggle-calendar")
+
+    monkeypatch.setattr(
+        PlaywrightExtractor,
+        "_navigate_calendar_to",
+        staticmethod(lambda _page, target: events.append(("navigate", target))),
+    )
+    monkeypatch.setattr(
+        PlaywrightExtractor,
+        "_click_calendar_day",
+        staticmethod(lambda _page, target: events.append(("select", target))),
+    )
+
+    PlaywrightExtractor._set_transaction_date_range(
+        Page(), DateFilter(), start, end, "Settlements"
+    )
+
+    assert events == [
+        "toggle-calendar",
+        ("navigate", start),
+        ("select", start),
+        ("navigate", end),
+        ("select", end),
+        "toggle-calendar",
+    ]
+
+
+def test_transaction_date_range_keeps_visible_textbox_path(monkeypatch):
+    events = []
+
+    class Locator:
+        def count(self):
+            return 1
+
+        def is_visible(self):
+            return True
+
+    class Page:
+        def locator(self, selector):
+            if selector in (
+                'input[aria-label="From"]:visible',
+                'input[aria-label="To"]:visible',
+            ):
+                return Locator()
+            raise AssertionError(f"Unexpected selector: {selector}")
+
+    class DateFilter:
+        def click(self):
+            events.append("toggle-filter")
+
+    monkeypatch.setattr(
+        PlaywrightExtractor,
+        "_set_date_range_text_inputs",
+        staticmethod(lambda *_args: events.append("set-text-fields")),
+    )
+
+    PlaywrightExtractor._set_transaction_date_range(
+        Page(), DateFilter(), date(2026, 11, 1), date(2026, 11, 11), "Settlements"
+    )
+
+    assert events == ["toggle-filter", "set-text-fields"]
+
+
+def test_apply_filter_click_does_not_wait_for_button_stability():
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.set_content(
+                """
+                <style>
+                  @keyframes move { from { transform: translateX(0); }
+                                    to { transform: translateX(1px); } }
+                  button { animation: move 10ms infinite alternate; }
+                </style>
+                <button type="button" onclick="
+                  document.querySelector('output').textContent = 'clicked';
+                ">Apply</button>
+                <output></output>
+                """
+            )
+
+            PlaywrightExtractor._click_apply_filter(page)
+
+            assert page.locator("output").inner_text() == "clicked"
+        finally:
+            browser.close()
 
 
 def test_persistent_context_reuses_profile_and_imports_saved_state_once(tmp_path):
