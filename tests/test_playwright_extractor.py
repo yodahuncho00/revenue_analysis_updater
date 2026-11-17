@@ -137,6 +137,135 @@ def test_apply_filter_click_does_not_wait_for_button_stability():
             browser.close()
 
 
+def test_set_date_range_text_inputs_uses_user_input_events():
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.set_content(
+                '<input aria-label="From"><input aria-label="To">'
+            )
+
+            PlaywrightExtractor._set_date_range_text_inputs(
+                page,
+                "2025-04-13 00:00:00",
+                "2026-11-15 23:59:59",
+                "Top-ups",
+            )
+
+            assert page.locator('input[aria-label="From"]').input_value() == (
+                "2025-04-13 00:00:00"
+            )
+            assert page.locator('input[aria-label="To"]').input_value() == (
+                "2026-11-15 23:59:59"
+            )
+        finally:
+            browser.close()
+
+
+def test_wait_for_filtered_transaction_response_skips_stale_unfiltered_request():
+    expected = {"date": {"gte": "2025-04-13 00:00:00.000", "lt": "2026-11-15 23:59:59.999"}}
+
+    class Response:
+        ok = True
+
+        def __init__(self, filters):
+            self.filters = filters
+
+        def finished(self):
+            return None
+
+        def json(self):
+            return {"props": {"filters": self.filters}}
+
+    unfiltered = Response([])
+    filtered = Response(expected)
+    responses = [unfiltered]
+
+    class Page:
+        def wait_for_timeout(self, _timeout):
+            responses.append(filtered)
+
+    result = PlaywrightExtractor._wait_for_filtered_transaction_response(
+        Page(), responses, 0, "Top-ups", expected, timeout_ms=100
+    )
+
+    assert result is filtered
+
+
+def test_wait_for_filtered_transaction_response_rejects_unfiltered_response():
+    expected = {"date": {"gte": "2025-04-13 00:00:00.000", "lt": "2026-11-15 23:59:59.999"}}
+
+    class Response:
+        ok = True
+
+        def finished(self):
+            return None
+
+        def json(self):
+            return {"props": {"filters": []}}
+
+    class Page:
+        def wait_for_timeout(self, _timeout):
+            pass
+
+    with pytest.raises(
+        PlaywrightExtractionError, match="did not return the requested filters"
+    ):
+        PlaywrightExtractor._wait_for_filtered_transaction_response(
+            Page(), [Response()], 0, "Top-ups", expected, timeout_ms=1
+        )
+
+
+def test_balance_table_wait_reloads_once_after_initial_timeout(monkeypatch):
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    class RowLocator:
+        def __init__(self, page):
+            self.page = page
+
+        @property
+        def first(self):
+            return self
+
+        def count(self):
+            return 0
+
+        def wait_for(self, **_kwargs):
+            self.page.waits += 1
+            if self.page.waits == 1:
+                raise PlaywrightTimeoutError("table not ready yet")
+
+    class Page:
+        url = "https://backoffice.example/balance"
+        waits = 0
+        reloads = 0
+
+        def locator(self, _selector):
+            return RowLocator(self)
+
+        def reload(self, **_kwargs):
+            self.reloads += 1
+
+        def get_by_role(self, *_args, **_kwargs):
+            return RowLocator(self)
+
+    monkeypatch.setattr(
+        PlaywrightExtractor,
+        "_wait_for_backoffice_ready",
+        lambda *_args: None,
+    )
+    extractor = PlaywrightExtractor({"backoffice": {"browser": {"timeout_ms": 1}}})
+    page = Page()
+
+    extractor._wait_for_balance_table(page, "Merchant Balance")
+
+    assert page.reloads == 1
+    assert page.waits == 2
+
+
 def test_persistent_context_reuses_profile_and_imports_saved_state_once(tmp_path):
     profile_dir = tmp_path / "profile"
     state_path = tmp_path / "storage_state.json"

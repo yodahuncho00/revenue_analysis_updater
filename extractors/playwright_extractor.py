@@ -222,6 +222,72 @@ class PlaywrightExtractor(BaseExtractor):
             ) from exc
 
     @staticmethod
+    def _balance_table_diagnostics(page: Any) -> str:
+        try:
+            title = page.title()
+        except Exception:
+            title = "(unavailable)"
+        try:
+            buttons = [
+                " ".join(text.split())
+                for text in page.locator("button:visible").all_inner_texts()
+                if text.strip()
+            ][:30]
+        except Exception:
+            buttons = []
+        try:
+            rows = page.locator("tbody tr").evaluate_all(
+                "rows => rows.slice(0, 10).map(row => row.getAttribute('class') || '')"
+            )
+            row_count = page.locator("tbody tr").count()
+        except Exception:
+            rows, row_count = [], 0
+        return (
+            f"url={page.url!r}, title={title!r}, table_rows={row_count}, "
+            f"sample_row_classes={rows!r}, visible_buttons={buttons!r}"
+        )
+
+    def _wait_for_balance_table(self, page: Any, page_name: str) -> None:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+        timeout = self.bo_cfg.get("browser", {}).get("timeout_ms", 30000)
+        try:
+            page.locator("tbody tr.account-row").first.wait_for(
+                state="visible", timeout=timeout
+            )
+            return
+        except PlaywrightTimeoutError:
+            self._assert_authenticated(page)
+
+        try:
+            page.reload(
+                wait_until="commit",
+                timeout=self.bo_cfg.get("browser", {}).get(
+                    "navigation_timeout_ms", 60000
+                ),
+            )
+        except PlaywrightError as exc:
+            raise PlaywrightExtractionError(
+                f"{page_name} account table did not load; retry navigation failed "
+                f"({exc}). {self._balance_table_diagnostics(page)}"
+            ) from exc
+
+        ready = page.get_by_role(
+            "button", name=re.compile(r"Reset(?: Filters| all)", re.IGNORECASE)
+        ).first
+        self._wait_for_backoffice_ready(page, ready, page_name)
+        try:
+            page.locator("tbody tr.account-row").first.wait_for(
+                state="visible", timeout=timeout
+            )
+        except PlaywrightTimeoutError as retry_timeout:
+            raise PlaywrightExtractionError(
+                f"{page_name} account table remained unavailable after one reload. "
+                f"{self._balance_table_diagnostics(page)}"
+            ) from retry_timeout
+
+    @staticmethod
     def _date_picker_diagnostics(page: Any) -> str:
         """Summarize visible date-picker controls when Backoffice UI changes."""
         try:
@@ -261,30 +327,8 @@ class PlaywrightExtractor(BaseExtractor):
                 f"{page_name} date menu did not expose exactly one visible From and To input. "
                 f"{PlaywrightExtractor._date_picker_diagnostics(page)}"
             )
-        page.evaluate(
-            """({fromValue, toValue}) => {
-                const visibleByLabel = label => Array.from(
-                    document.querySelectorAll("input[aria-label]")
-                ).filter(input => input.getAttribute("aria-label") === label
-                    && input.getClientRects().length > 0);
-                const from = visibleByLabel("From");
-                const to = visibleByLabel("To");
-                if (from.length !== 1 || to.length !== 1) {
-                    throw new Error("Visible From/To date inputs changed while opening the menu.");
-                }
-                const setValue = Object.getOwnPropertyDescriptor(
-                    HTMLInputElement.prototype, "value"
-                ).set;
-                setValue.call(from[0], fromValue);
-                setValue.call(to[0], toValue);
-                for (const input of [from[0], to[0]]) {
-                    input.dispatchEvent(new Event("input", {bubbles: true}));
-                    input.dispatchEvent(new Event("change", {bubbles: true}));
-                }
-                return [from[0].value, to[0].value];
-            }""",
-            {"fromValue": from_value, "toValue": to_value},
-        )
+        from_input.fill(from_value)
+        to_input.fill(to_value)
 
     @classmethod
     def _set_transaction_date_range(
@@ -332,6 +376,45 @@ class PlaywrightExtractor(BaseExtractor):
                 }
                 buttons[0].click();
             }"""
+        )
+
+    @classmethod
+    def _wait_for_filtered_transaction_response(
+        cls,
+        page: Any,
+        responses: List[Any],
+        start_index: int,
+        page_name: str,
+        expected_filters: Any,
+        timeout_ms: int,
+    ) -> Any:
+        deadline = time.monotonic() + timeout_ms / 1000
+        response_index = start_index
+        received_filters = []
+        while time.monotonic() < deadline:
+            while response_index < len(responses):
+                response = responses[response_index]
+                response_index += 1
+                response.finished()
+                if not response.ok:
+                    continue
+                try:
+                    filters = response.json().get("props", {}).get("filters", {})
+                except (ValueError, TypeError):
+                    continue
+                if cls._normalize_date_filters(filters) == cls._normalize_date_filters(
+                    expected_filters
+                ):
+                    return response
+                received_filters.append(filters)
+            page.wait_for_timeout(50)
+        if received_filters:
+            raise PlaywrightExtractionError(
+                f"{page_name} did not return the requested filters within {timeout_ms} ms. "
+                f"Expected {expected_filters!r}; received {received_filters!r}."
+            )
+        raise PlaywrightExtractionError(
+            f"{page_name} filter produced no JSON table response within {timeout_ms} ms."
         )
 
     @staticmethod
@@ -990,7 +1073,7 @@ class PlaywrightExtractor(BaseExtractor):
                     ).first,
                     "Merchant Balance",
                 )
-                page.wait_for_selector("tbody tr.account-row")
+                self._wait_for_balance_table(page, "Merchant Balance")
                 first_read = self._read_table_rows(page)
                 page.wait_for_timeout(300)
                 second_read = self._read_table_rows(page)
@@ -1334,7 +1417,21 @@ class PlaywrightExtractor(BaseExtractor):
             }
         }
         with sync_playwright() as playwright:
-            with self._authenticated_page(playwright, url) as page:
+            route_responses = []
+
+            def capture_route_response(response: Any) -> None:
+                if (
+                    urlparse(response.url).path == route_path
+                    and response.request.resource_type in ("fetch", "xhr")
+                ):
+                    route_responses.append(response)
+
+            with self._authenticated_page(
+                playwright, url, response_handler=capture_route_response
+            ) as page:
+                timeout = self.bo_cfg.get("browser", {}).get(
+                    "transaction_response_timeout_ms", 120000
+                )
                 reset = page.get_by_role(
                     "button", name=re.compile(r"Reset(?: Filters| all)", re.IGNORECASE)
                 ).first
@@ -1346,27 +1443,16 @@ class PlaywrightExtractor(BaseExtractor):
                 self._set_transaction_date_range(
                     page, date_filter, from_date, to_date, capture_name.title()
                 )
-                timeout = self.bo_cfg.get("browser", {}).get(
-                    "transaction_response_timeout_ms", 120000
+                response_start_index = len(route_responses)
+                self._click_apply_filter(page)
+                response = self._wait_for_filtered_transaction_response(
+                    page,
+                    route_responses,
+                    response_start_index,
+                    capture_name.title(),
+                    expected_filters,
+                    timeout,
                 )
-                try:
-                    with page.expect_response(
-                        lambda response: urlparse(response.url).path == route_path,
-                        timeout=timeout,
-                    ) as response_info:
-                        self._click_apply_filter(page)
-                except Exception as exc:
-                    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
-                    if not isinstance(exc, PlaywrightTimeoutError):
-                        raise
-                    raise PlaywrightExtractionError(
-                        f"{capture_name.title()} filter request returned no response "
-                        f"within {timeout} ms (page: {page.url}). Retry the run; "
-                        "if it repeats, refresh the Backoffice session and check connectivity."
-                    ) from exc
-
-                response = response_info.value
                 first_page = self._transaction_payload(response, 1)
                 response_body = response.json()
                 filters = response_body.get("props", {}).get("filters", {})
