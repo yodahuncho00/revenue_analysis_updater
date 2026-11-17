@@ -22,6 +22,19 @@ paths:
   browser_profile_dir: "%LOCALAPPDATA%\\RevenueAnalysisUpdater\\BackofficeProfile"
   fixtures_dir: "data/fixtures"
 
+google_sheets:
+  enabled: true
+  folder_id: "1aL7KFzHT2nSY4HA9LUmNLu19agJs78KH"
+  service_account_file: "payrollkz-09683128fc5a.json"
+  gateway_spreadsheet_name: "Backoffice_Gateway"
+  pos_spreadsheet_name: "Backoffice_POS"
+  gateway_tabs:
+    BO_extract: "BO_extract"
+    BO_provider_balance: "BO_provider_balance"
+    BO_merchant_balance: "BO_merchant_balance"
+    BO_settlements: "BO_settlements"
+    BO_topups: "BO_topups"
+
 backoffice:
   base_url: "https://backoffice.zoyktech.com"
   login_url: "https://backoffice.zoyktech.com/login"

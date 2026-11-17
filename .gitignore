@@ -3,6 +3,9 @@
 **/__pycache__/
 .pytest_cache/
 data/
+/payrollkz-09683128fc5a.json
+*.service-account.json
+*service_account*.json
 
 # Private financial workbooks and generated dashboard output
 05. Revenue_analysis*.xlsx

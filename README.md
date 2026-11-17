@@ -28,7 +28,7 @@ Windows ETL that independently updates the Gateway and POS revenue workbooks fro
    .venv\Scripts\python.exe scripts\refresh_backoffice_session.py
    ```
    Tab 1 is Backoffice and tab 2 is POS Payments. Session state is saved per Windows user. Do not copy `data\storage_state.json` or the browser profile from another computer.
-7. Register the daily task at 10:58 local time:
+7. Register the daily task at 09:11 local time:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1
    ```
@@ -48,6 +48,24 @@ scripts\run_daily_etl.bat --test-alert
 ```
 
 The workbooks and dashboard outputs are local/private files and are ignored by Git. Sanitized dashboard templates are stored under `templates/`.
+
+## Google Sheets mirror
+
+After a complete, successful local refresh, the program mirrors the five Gateway
+extract tabs to `Backoffice_Gateway` and POS payment values to `Backoffice_POS`
+(`BO_extract!A3:R`). It replaces the corresponding remote ranges and copies cell
+formatting. Dry runs and single-step Gateway runs do not sync. If the Google
+update fails, the local workbook remains committed and the run reports failure
+so the remote copy can be checked.
+
+The service-account key must be provisioned locally as
+`payrollkz-09683128fc5a.json` (or update `google_sheets.service_account_file`
+in `config.yaml`). Never commit or send this key. Share the Drive folder with
+the service account as an Editor and enable the Google Drive API and Google
+Sheets API in its Google Cloud project. The integration uses the configured
+folder and spreadsheet names in `config.yaml`. HTTPS verification uses certifi's
+CA bundle plus Windows' trusted root certificates by default. A custom
+`google_sheets.ca_bundle` PEM path can override this; verification remains enabled.
 
 ## Keep one runner per workbook
 

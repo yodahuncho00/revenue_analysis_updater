@@ -84,10 +84,25 @@ are written against their individual provider IDs.
 ### 1.3 Normal Production Daily Run
 Runs both independent ETLs: Backoffice refreshes `05. Revenue_analysis_Gateway.xlsx`
 and its dashboard; POS Portal replaces all rows in `05. Revenue_analysis_POS.xlsx`
-and refreshes its dashboard:
+and refreshes its dashboard. After each local refresh succeeds, extracted Gateway
+tabs and POS payments are mirrored to the configured Google Sheets. The sync
+replaces the matching remote data ranges and copies cell formatting; dry runs and
+single-step Gateway runs skip this. A Google Sheets failure is reported as a failed
+run, but does not roll back an already committed local workbook:
 ```bash
 python main.py
 ```
+
+For Google Sheets access, keep the service-account JSON key in the project folder
+as configured in `config.yaml`; do not commit or share the key. The Drive folder
+must be shared with that service account as an Editor, and both the Google Drive
+API and Google Sheets API must be enabled for its Cloud project. `Backoffice_POS`
+receives payment data in `BO_extract!A3:R`; the Gateway target tabs are listed in
+`google_sheets.gateway_tabs`. The local Gateway tab is named `BO_merchant_balance`
+(singular); source-to-destination tab mappings are configurable there. On managed networks
+that intercept HTTPS, the default bundle includes certifi and the Windows trusted
+root store. A custom trusted PEM bundle can be set with `google_sheets.ca_bundle`;
+do not disable certificate verification.
 
 ### 1.4 Backfill or Run for a Specific Date
 Re-runs or backfills the pipeline for an explicit as-of date (calculates `to_date = D - 1`):
@@ -185,6 +200,7 @@ computer becomes available, if Windows permits it.
 | `ReconciliationError: Row count mismatch between BO_extract and Data` | The number of `Filter == 1` rows does not match rows written to `Data`. | Check `data/reports/<run_id>.json` diagnostics. |
 | `ReconciliationError: Control strict gate failed` | A core accounting identity on `Control` (rows 68, 74–78) failed to foot. | Inspect `Control` tab formula checks. |
 | `Mapping notice at row 69: Add merchant to Merchant_master` | A new merchant appeared in Backoffice that has not been mapped yet. | Informational notice: open `Merchant_master` and map the new merchant name in Column B. |
+| Google Drive/Sheets permission, file, or tab error | Local workbook committed, but the configured remote mirror did not complete. | Check the service-account key path, share the configured folder with the service account as Editor, enable both APIs, and confirm the configured spreadsheet and tab names. Rerun the normal full pipeline to retry the mirror. |
 
 ---
 
@@ -204,7 +220,7 @@ Before going fully live, run the autonomous pipeline in shadow mode:
 3. Once satisfied with complete cell-by-cell equality over 3–5 days, activate the automated Windows Task Scheduler job.
 
 ### Task Scheduler Notes
-Install or update the daily job at 10:58 local time (all seven days) from a
+Install or update the daily job at 09:11 local time (all seven days) from a
 PowerShell prompt in the project directory:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_task_scheduler.ps1

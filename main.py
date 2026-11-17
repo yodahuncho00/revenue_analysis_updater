@@ -90,7 +90,11 @@ def load_config(config_path: str = "config.yaml") -> dict:
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration file must contain a YAML mapping: {config_path}")
+    config["_project_root"] = os.path.dirname(os.path.abspath(config_path))
+    return config
 
 def _run_backoffice_pipeline(
     config_path: str = "config.yaml",
@@ -460,6 +464,28 @@ def _run_backoffice_pipeline(
 
         # Release lock
         copy_mgr.release_lock()
+
+        google_settings = config.get("google_sheets", {})
+        if not dry_run and step is None and google_settings.get("enabled", False):
+            from integrations.google_sheets_sync import GoogleSheetsSync
+
+            logger.info("Syncing committed Gateway data to Google Sheets...")
+            GoogleSheetsSync(config).sync_workbook_tabs(
+                os.path.abspath(prod_path),
+                google_settings.get("gateway_spreadsheet_name", "Backoffice_Gateway"),
+                google_settings.get(
+                    "gateway_tabs",
+                    {
+                        "BO_extract": "BO_extract",
+                        "BO_provider_balance": "BO_provider_balance",
+                        "BO_merchant_balance": "BO_merchants_balance",
+                        "BO_settlements": "BO_settlements",
+                        "BO_topups": "BO_topups",
+                    },
+                ),
+                logger=logger,
+            )
+            checks_passed.append("google_sheets_gateway_sync_successful")
 
         duration = time.time() - start_time
         RunReportGenerator.generate_report(

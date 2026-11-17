@@ -118,6 +118,20 @@ def run_pos_pipeline(config, dry_run=False, logger=None):
         manager.cleanup_working_copy()
         dashboard_rows = update_pos_dashboard(workbook_path, dashboard_template, dashboard_path)
         logger.info("POS dashboard refreshed with %s transactions.", dashboard_rows)
+        manager.release_lock()
+
+        google_settings = config.get("google_sheets", {})
+        if google_settings.get("enabled", False):
+            from integrations.google_sheets_sync import GoogleSheetsSync
+
+            logger.info("Syncing committed POS payment data to Google Sheets...")
+            GoogleSheetsSync(config).sync_pos_payments(
+                os.path.abspath(workbook_path),
+                google_settings.get("pos_spreadsheet_name", "Backoffice_POS"),
+                POS_HEADERS,
+                rows,
+                logger=logger,
+            )
         logger.info("POS full refresh completed in %.2f seconds.", time.time() - started)
         return {"success": True, "rows": len(rows), "dashboard_rows": dashboard_rows, "committed": True}
     except Exception:
