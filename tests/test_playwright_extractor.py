@@ -109,6 +109,68 @@ def test_transaction_date_range_keeps_visible_textbox_path(monkeypatch):
     assert events == ["toggle-filter", "set-text-fields"]
 
 
+def test_transaction_date_range_falls_back_to_calendar_if_text_update_fails(monkeypatch):
+    from playwright.sync_api import Error as PlaywrightError
+
+    start = date(2026, 11, 1)
+    end = date(2026, 11, 11)
+    events = []
+
+    class Locator:
+        def __init__(self, count):
+            self._count = count
+            self.last = self
+
+        def count(self):
+            return self._count
+
+    class Page:
+        def locator(self, selector):
+            if selector in (
+                'input[aria-label="From"]:visible',
+                'input[aria-label="To"]:visible',
+            ):
+                return Locator(1)
+            if selector == ".q-date:visible":
+                return Locator(1)
+            raise AssertionError(f"Unexpected selector: {selector}")
+
+    class DateFilter:
+        def click(self):
+            events.append("toggle-filter")
+
+    def fail_text_update(*_args):
+        raise PlaywrightError("input detached")
+
+    monkeypatch.setattr(
+        PlaywrightExtractor, "_set_date_range_text_inputs", staticmethod(fail_text_update)
+    )
+    monkeypatch.setattr(
+        PlaywrightExtractor,
+        "_prepare_open_calendar_date_range",
+        staticmethod(lambda _page, start_date, end_date: events.append(
+            ("prepare-calendar", start_date, end_date)
+        )),
+    )
+    monkeypatch.setattr(
+        PlaywrightExtractor,
+        "_select_calendar_end_date",
+        staticmethod(lambda _page, _date_filter, target: events.append(
+            ("select-end", target)
+        )),
+    )
+
+    PlaywrightExtractor._set_transaction_date_range(
+        Page(), DateFilter(), start, end, "Settlements"
+    )
+
+    assert events == [
+        "toggle-filter",
+        ("prepare-calendar", start, end),
+        ("select-end", end),
+    ]
+
+
 def test_apply_filter_click_does_not_wait_for_button_stability():
     from playwright.sync_api import sync_playwright
 
@@ -161,6 +223,49 @@ def test_set_date_range_text_inputs_uses_user_input_events():
             assert page.locator('input[aria-label="To"]').input_value() == (
                 "2026-11-15 23:59:59"
             )
+        finally:
+            browser.close()
+
+
+def test_set_date_range_text_inputs_survives_fields_remounting_on_input():
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.set_content(
+                """
+                <div id="fields">
+                  <input aria-label="From">
+                  <input aria-label="To">
+                </div>
+                <script>
+                  window.received = {};
+                  const [fromInput, toInput] =
+                    document.querySelectorAll("#fields input");
+                  fromInput.addEventListener("input", event => {
+                    window.received.from = event.target.value;
+                    document.querySelector("#fields").replaceChildren();
+                  });
+                  toInput.addEventListener("input", event => {
+                    window.received.to = event.target.value;
+                  });
+                </script>
+                """
+            )
+
+            PlaywrightExtractor._set_date_range_text_inputs(
+                page,
+                "2025-04-13 00:00:00",
+                "2026-11-15 23:59:59",
+                "Top-ups",
+            )
+
+            assert page.evaluate("window.received") == {
+                "from": "2025-04-13 00:00:00",
+                "to": "2026-11-15 23:59:59",
+            }
         finally:
             browser.close()
 

@@ -319,7 +319,7 @@ class PlaywrightExtractor(BaseExtractor):
     def _set_date_range_text_inputs(
         page: Any, from_value: str, to_value: str, page_name: str
     ) -> None:
-        """Set both reactive Quasar date fields in one DOM turn to avoid rerenders."""
+        """Set both reactive Quasar date fields before their rerender can detach either."""
         from_input = page.locator('input[aria-label="From"]:visible')
         to_input = page.locator('input[aria-label="To"]:visible')
         if from_input.count() != 1 or to_input.count() != 1:
@@ -327,14 +327,44 @@ class PlaywrightExtractor(BaseExtractor):
                 f"{page_name} date menu did not expose exactly one visible From and To input. "
                 f"{PlaywrightExtractor._date_picker_diagnostics(page)}"
             )
-        from_input.fill(from_value)
-        to_input.fill(to_value)
+        page.evaluate(
+            """({fromValue, toValue}) => {
+                const isVisible = input => input.getClientRects().length > 0
+                    && getComputedStyle(input).visibility !== "hidden";
+                const fromInputs = Array.from(document.querySelectorAll(
+                    'input[aria-label="From"]'
+                )).filter(isVisible);
+                const toInputs = Array.from(document.querySelectorAll(
+                    'input[aria-label="To"]'
+                )).filter(isVisible);
+                if (fromInputs.length !== 1 || toInputs.length !== 1) {
+                    throw new Error(
+                        `Expected one visible From and To input; found `
+                        + `${fromInputs.length} and ${toInputs.length}.`
+                    );
+                }
+
+                const inputs = [fromInputs[0], toInputs[0]];
+                const values = [fromValue, toValue];
+                const setValue = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype, "value"
+                ).set;
+                inputs.forEach((input, index) => setValue.call(input, values[index]));
+                inputs.forEach(input => {
+                    input.dispatchEvent(new Event("input", {bubbles: true}));
+                    input.dispatchEvent(new Event("change", {bubbles: true}));
+                });
+            }""",
+            {"fromValue": from_value, "toValue": to_value},
+        )
 
     @classmethod
     def _set_transaction_date_range(
         cls, page: Any, date_filter: Any, from_date: date, to_date: date, page_name: str
     ) -> None:
         """Set a transaction date filter using its visible fields or calendar."""
+        from playwright.sync_api import Error as PlaywrightError
+
         date_filter.click()
         from_input = page.locator('input[aria-label="From"]:visible')
         to_input = page.locator('input[aria-label="To"]:visible')
@@ -342,12 +372,23 @@ class PlaywrightExtractor(BaseExtractor):
             from_input.count() == 1
             and to_input.count() == 1
         ):
-            cls._set_date_range_text_inputs(
-                page,
-                f"{from_date:%Y-%m-%d} 00:00:00",
-                f"{to_date:%Y-%m-%d} 23:59:59",
-                page_name,
-            )
+            try:
+                cls._set_date_range_text_inputs(
+                    page,
+                    f"{from_date:%Y-%m-%d} 00:00:00",
+                    f"{to_date:%Y-%m-%d} 23:59:59",
+                    page_name,
+                )
+            except PlaywrightError as text_input_error:
+                calendar = page.locator(".q-date:visible").last
+                if not calendar.count():
+                    raise PlaywrightExtractionError(
+                        f"{page_name} date inputs could not be updated and no visible "
+                        f"calendar fallback is available ({text_input_error}). "
+                        f"{cls._date_picker_diagnostics(page)}"
+                    ) from text_input_error
+                cls._prepare_open_calendar_date_range(page, from_date, to_date)
+                cls._select_calendar_end_date(page, date_filter, to_date)
             return
 
         calendar = page.locator(".q-date:visible").last

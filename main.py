@@ -116,6 +116,12 @@ def _run_backoffice_pipeline(
     logger, run_id = setup_logger(log_dir="data/logs")
     alerter = Alerter(logger)
     logger.info(f"Starting Revenue Analysis ETL Job (run_id={run_id}, dry_run={dry_run}, extractor={extractor_type})")
+    logger.info(f"Application entry point: {os.path.abspath(__file__)}")
+    extractor_module = sys.modules[PlaywrightExtractor.__module__]
+    logger.info(
+        "Playwright extractor loaded from: "
+        f"{os.path.abspath(extractor_module.__file__)}"
+    )
 
     # 2. Date calculations
     date_mgr = DateManager(
