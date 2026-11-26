@@ -453,6 +453,14 @@ def main(preflight: bool = False, resume: bool = False, force_visible: bool = Fa
         summary["overall_ok"] = bool(all_ok and all(completed.values()))
         if preflight:
             _write_preflight_summary(logs_dir, summary)
+            try:
+                from notify.telegram_notifier import TelegramNotifier
+
+                TelegramNotifier.from_config(config).notify_preflight_summary(
+                    summary, logs_dir=logs_dir
+                )
+            except Exception as exc:
+                print(f"Warning: Telegram notification failed ({exc}).", flush=True)
         if etl_state_dir is not None:
             etl_state_dir.cleanup()
     return 0 if (all_ok and all(completed.values())) else 1
