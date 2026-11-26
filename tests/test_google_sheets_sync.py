@@ -416,3 +416,15 @@ def test_sheets_write_retries_rate_limit_once(monkeypatch):
     assert GoogleSheetsSync._execute_write(request) == {"success": True}
     assert request.calls == 2
     assert sleeps == [2.0]
+
+
+def test_cell_format_coerces_fractional_font_size_to_int():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "hello"
+    ws["A1"].font = openpyxl.styles.Font(size=9.75, bold=True)
+    fmt = google_sheets_sync._cell_format(ws["A1"])
+    wb.close()
+
+    assert fmt["textFormat"]["fontSize"] == 10
+    assert isinstance(fmt["textFormat"]["fontSize"], int)

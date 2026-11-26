@@ -90,7 +90,7 @@ def _parse_css_color(value: Optional[str]) -> Optional[str]:
     return None
 
 
-def _parse_css_font_size(value: Optional[str]) -> Optional[float]:
+def _parse_css_font_size(value: Optional[str]) -> Optional[int]:
     if not value:
         return None
     text = value.strip().lower()
@@ -99,7 +99,8 @@ def _parse_css_font_size(value: Optional[str]) -> Optional[float]:
         return None
     amount = float(match.group(1))
     unit = match.group(2)
-    return round(amount * 0.75, 2) if unit == "px" else round(amount, 2)
+    pts = amount * 0.75 if unit == "px" else amount
+    return max(1, int(round(pts)))
 
 
 def _parse_css_border_side(value: Optional[str]) -> Optional[Side]:

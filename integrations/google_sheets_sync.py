@@ -320,7 +320,7 @@ def _cell_format(cell: Any) -> Dict[str, Any]:
     if cell.font.name:
         font["fontFamily"] = cell.font.name
     if cell.font.sz:
-        font["fontSize"] = cell.font.sz
+        font["fontSize"] = max(1, int(round(float(cell.font.sz))))
     font_color = _rgb_color(cell.font.color)
     if font_color:
         font["foregroundColor"] = font_color
@@ -353,7 +353,7 @@ def _cell_format(cell: Any) -> Dict[str, Any]:
     if cell.alignment.wrap_text is not None:
         result["wrapStrategy"] = "WRAP" if cell.alignment.wrap_text else "CLIP"
     if cell.alignment.text_rotation:
-        result["textRotation"] = {"angle": cell.alignment.text_rotation}
+        result["textRotation"] = {"angle": int(round(float(cell.alignment.text_rotation)))}
 
     number_format = _number_format(cell)
     if number_format:
