@@ -417,12 +417,27 @@ def main(preflight: bool = False, resume: bool = False, force_visible: bool = Fa
                     command.append("--resume")
 
                 print(f"Starting {source.title()} ETL...", flush=True)
+                source_timeout = int(
+                    config.get("app", {}).get("source_etl_timeout_seconds", 900)
+                )
                 try:
                     result = subprocess.run(
                         command,
                         cwd=str(PROJECT_ROOT),
                         env=child_env,
+                        timeout=source_timeout,
                     )
+                except subprocess.TimeoutExpired:
+                    all_ok = False
+                    summary["sources"][source]["etl_status"] = "failed"
+                    summary["sources"][source]["error"] = (
+                        f"{source.title()} ETL timed out after {source_timeout}s."
+                    )
+                    print(
+                        f"{source.title()} ETL timed out after {source_timeout}s.",
+                        flush=True,
+                    )
+                    continue
                 except Exception as exc:
                     all_ok = False
                     summary["sources"][source]["etl_status"] = "failed"

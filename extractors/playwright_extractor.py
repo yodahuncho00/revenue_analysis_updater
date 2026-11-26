@@ -563,9 +563,14 @@ class PlaywrightExtractor(BaseExtractor):
                 response.finished()
                 if not response.ok:
                     continue
+                headers = getattr(response, "headers", None)
+                if isinstance(headers, dict):
+                    ctype = str(headers.get("content-type", "")).lower()
+                    if ctype and "json" not in ctype:
+                        continue
                 try:
                     filters = response.json().get("props", {}).get("filters", {})
-                except (ValueError, TypeError):
+                except Exception:
                     continue
                 if cls._normalize_date_filters(filters) == cls._normalize_date_filters(
                     expected_filters
@@ -1710,20 +1715,26 @@ class PlaywrightExtractor(BaseExtractor):
         }
         route_responses = []
 
-        def capture_route_response(response: Any) -> None:
+        def capture_finished_request(request: Any) -> None:
             try:
                 if (
-                    urlparse(response.url).path == route_path
-                    and response.request.resource_type in ("fetch", "xhr")
+                    urlparse(request.url).path == route_path
+                    and request.resource_type in ("fetch", "xhr")
                 ):
-                    route_responses.append(response)
+                    resp = request.response()
+                    if resp is not None:
+                        route_responses.append(resp)
             except Exception:
                 pass
 
         with self._browser_context() as context:
             page = context.new_page()
-            page.on("response", capture_route_response)
+            # Listen on requestfinished (not response) so response bodies are already complete
+            # and response.finished() can never block indefinitely on a stalled stream.
+            page.on("requestfinished", capture_finished_request)
             try:
+                if self.logger:
+                    self.logger.info("%s: navigating to %s", capture_name.title(), url)
                 page.goto(
                     url,
                     wait_until="commit",
@@ -1743,6 +1754,13 @@ class PlaywrightExtractor(BaseExtractor):
                 date_filter = page.get_by_role(
                     "button", name=re.compile(r"^Date\b", re.IGNORECASE)
                 ).first
+                if self.logger:
+                    self.logger.info(
+                        "%s: applying date filter %s..%s",
+                        capture_name.title(),
+                        from_date,
+                        to_date,
+                    )
                 self._set_transaction_date_range(
                     page, date_filter, from_date, to_date, capture_name.title()
                 )
@@ -1813,6 +1831,13 @@ class PlaywrightExtractor(BaseExtractor):
                         f"captured {len(records)}."
                     )
 
+                if self.logger:
+                    self.logger.info(
+                        "%s: downloading CSV export (%d API records across %d page(s))...",
+                        capture_name.title(),
+                        expected_total,
+                        last_page,
+                    )
                 export_button = page.get_by_role("button", name=re.compile("Export to csv", re.IGNORECASE))
                 if export_button.count() != 1:
                     raise PlaywrightExtractionError(
@@ -1864,7 +1889,7 @@ class PlaywrightExtractor(BaseExtractor):
             finally:
                 if hasattr(page, "remove_listener"):
                     try:
-                        page.remove_listener("response", capture_route_response)
+                        page.remove_listener("requestfinished", capture_finished_request)
                     except Exception:
                         pass
                 try:
