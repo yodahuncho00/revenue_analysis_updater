@@ -270,6 +270,25 @@ try {
     }
 
     Write-UpdateLog "Update complete ($($targetSha.Substring(0, 7)))."
+
+    # Refresh Desktop shortcut if this machine uses Desktop shortcuts (migrates legacy names & icon).
+    $shortcutHelper = Join-Path $ProjectDir "scripts\create_desktop_shortcut.ps1"
+    if (Test-Path -LiteralPath $shortcutHelper) {
+        try {
+            $desktopDir = [Environment]::GetFolderPath("Desktop")
+            $hasAnyShortcut = @(
+                "Run Revenue Update.lnk",
+                "Retry Revenue Update.lnk",
+                "Update and re-run.lnk"
+            ) | Where-Object { Test-Path -LiteralPath (Join-Path $desktopDir $_) }
+            if ($hasAnyShortcut) {
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shortcutHelper -ProjectDir $ProjectDir 2>&1 | Out-Null
+            }
+        } catch {
+            # Non-fatal
+        }
+    }
+
     $newBatHash = Get-FileSha256 $batPath
     if ($prevBatHash -and $newBatHash -and ($prevBatHash -ne $newBatHash)) {
         Write-UpdateLog "run_daily_etl.bat changed; signaling caller to re-launch updated script."

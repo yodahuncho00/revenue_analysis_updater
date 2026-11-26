@@ -66,7 +66,7 @@ if exist data\logs\latest_run.txt set /p RUN_ID=<data\logs\latest_run.txt
   echo Scheduler log: data\logs\scheduler.log
   echo Last Run ID: %RUN_ID%.
   echo To retry only failed/unfinished stages without re-scraping completed ones:
-  echo   Double-click "Retry Revenue Update" on your Desktop (or run scripts\run_daily_etl.bat --resume)
+  echo   Double-click "Update and re-run" on your Desktop (or run scripts\run_daily_etl.bat --resume)
   echo If login or OTP is requested, run:
   echo   .venv\Scripts\python.exe scripts\refresh_backoffice_session.py
   echo Do not send the workbook, exports, browser profile, or storage_state.json.

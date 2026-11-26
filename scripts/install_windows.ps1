@@ -91,31 +91,8 @@ with open(path, 'w', encoding='utf-8') as f:
 }
 
 if ($CreateDesktopShortcuts) {
-    $DesktopDir = [Environment]::GetFolderPath("Desktop")
-    $WshShell = New-Object -ComObject WScript.Shell
-    $BatPath = Join-Path $ProjectDir "scripts\run_daily_etl.bat"
-
-    $shortcuts = @(
-        @{
-            Name = "Run Revenue Update.lnk"
-            Args = ""
-            Desc = "Check for updates and run the daily Revenue Analysis update"
-        },
-        @{
-            Name = "Retry Revenue Update.lnk"
-            Args = "--resume"
-            Desc = "Check for updates and resume today's Revenue Analysis update"
-        }
-    )
-    foreach ($item in $shortcuts) {
-        $lnk = $WshShell.CreateShortcut((Join-Path $DesktopDir $item.Name))
-        $lnk.TargetPath = "cmd.exe"
-        $lnk.Arguments = if ($item.Args) { "/c `"$BatPath`" $($item.Args)" } else { "/c `"$BatPath`"" }
-        $lnk.WorkingDirectory = $ProjectDir
-        $lnk.Description = $item.Desc
-        $lnk.Save()
-        Write-Host "Created Desktop shortcut: $($item.Name)"
-    }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "create_desktop_shortcut.ps1") -ProjectDir $ProjectDir
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the Desktop shortcut." }
 }
 
 Write-Host "Dependencies installed in $VenvPython"
