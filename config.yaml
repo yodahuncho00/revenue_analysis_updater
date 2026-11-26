@@ -132,3 +132,11 @@ sheets:
     rpt_month_label: "Reporting month (month-end)"
     checks_start_row: 68
     checks_end_row: 78
+
+telegram:
+  enabled: true
+  bot_token: "9135193201:AAHxFXdf5SC5olp4BDSEOpix2HriO1s-BDs"
+  chat_id: "415930293"
+  machine_name: "Brother-PC"
+  notify_on_success: true        # set to false if you only want failure alerts
+  attach_logs_on_failure: true
