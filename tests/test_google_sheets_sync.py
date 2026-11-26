@@ -428,3 +428,49 @@ def test_cell_format_coerces_fractional_font_size_to_int():
 
     assert fmt["textFormat"]["fontSize"] == 10
     assert isinstance(fmt["textFormat"]["fontSize"], int)
+
+
+def test_pos_sync_formats_trailing_datetime_rows_even_when_workbook_cells_are_general(tmp_path):
+    workbook_path = tmp_path / "pos.xlsx"
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet.title = "BO_extract"
+    worksheet.append(["Title"])
+    worksheet.append(["Instructions"])
+    worksheet.append(["Payment ID", "Datetime"] + [""] * 16)
+    # Row 4 is pre-formatted; row 5 is untouched General in the workbook
+    worksheet["B4"] = datetime(2026, 11, 25, 9, 30)
+    worksheet["B4"].number_format = "DD.MM.YYYY"
+    workbook.save(workbook_path)
+    workbook.close()
+
+    sheets = _Sheets()
+    sync = _sync(tmp_path, _Drive(), sheets)
+    rows = [
+        [101, datetime(2026, 11, 25, 9, 30)] + [None] * 16,
+        [102, datetime(2026, 11, 26, 11, 35)] + [None] * 16,
+    ]
+    sync.sync_pos_payments(
+        str(workbook_path),
+        "Backoffice_POS",
+        ["Payment ID", "Datetime"] + [""] * 16,
+        rows,
+    )
+
+    date_ranges = [
+        req["repeatCell"]["range"]
+        for batch in sheets.batch_updates
+        for req in batch["body"]["requests"]
+        if req.get("repeatCell", {})
+        .get("cell", {})
+        .get("userEnteredFormat", {})
+        .get("numberFormat", {})
+        .get("pattern")
+        == "DD.MM.YYYY"
+        and req["repeatCell"]["range"]["startColumnIndex"] <= 1 < req["repeatCell"]["range"]["endColumnIndex"]
+    ]
+    # Both row 4 (index 3) and row 5 (index 4) must be covered by DD.MM.YYYY date formatting
+    covered_rows = {
+        r for rng in date_ranges for r in range(rng["startRowIndex"], rng["endRowIndex"])
+    }
+    assert 3 in covered_rows and 4 in covered_rows

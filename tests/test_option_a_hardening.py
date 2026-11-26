@@ -234,7 +234,12 @@ def test_pos_pipeline_resume_skips_extraction_and_commit_when_already_committed(
     wb.close()
 
     # Pre-seed checkpoint as if workbook_commit succeeded earlier today
-    ckpt = StageCheckpoint("pos", "2026-11-26", base_dir=str(checkpoints_dir))
+    ckpt = StageCheckpoint(
+        "pos",
+        "2026-11-26",
+        base_dir=str(checkpoints_dir),
+        scope_key=str(workbook_path),
+    )
     ckpt.save_pos_rows([row_data])
     ckpt.mark_stage("extract_pos_payments", details={"rows": 1})
     ckpt.mark_stage("workbook_commit", details={"rows": 1})
@@ -268,9 +273,23 @@ def test_pos_pipeline_resume_skips_extraction_and_commit_when_already_committed(
     res = run_pos_pipeline(cfg, dry_run=False, resume=True, override_date="2026-11-26")
     assert res["success"] is True
     assert dashboard_path.is_file()
-    assert StageCheckpoint("pos", "2026-11-26", base_dir=str(checkpoints_dir)).is_stage_done(
-        "publish_dashboard"
-    )
+    assert StageCheckpoint(
+        "pos",
+        "2026-11-26",
+        base_dir=str(checkpoints_dir),
+        scope_key=str(workbook_path),
+    ).is_stage_done("publish_dashboard")
+
+
+def test_stage_checkpoint_isolates_different_workbooks_on_same_machine(tmp_path):
+    wb_a = tmp_path / "dev" / "05. Revenue_analysis_POS.xlsx"
+    wb_b = tmp_path / "release" / "05. Revenue_analysis_POS.xlsx"
+    ckpt_a = StageCheckpoint("pos", "2026-11-26", base_dir=str(tmp_path), scope_key=str(wb_a))
+    ckpt_b = StageCheckpoint("pos", "2026-11-26", base_dir=str(tmp_path), scope_key=str(wb_b))
+
+    ckpt_a.mark_stage("workbook_commit", details={"rows": 5396})
+    assert ckpt_a.is_stage_done("workbook_commit") is True
+    assert ckpt_b.is_stage_done("workbook_commit") is False
 
 
 def test_preflight_writes_per_source_summary_when_one_login_fails(tmp_path, monkeypatch):

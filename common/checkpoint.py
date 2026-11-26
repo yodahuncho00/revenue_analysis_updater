@@ -1,6 +1,7 @@
 """Per-date stage checkpointing stored outside OneDrive for fast, safe ETL resume."""
 
 from datetime import date, datetime
+import hashlib
 import json
 import os
 import tempfile
@@ -57,12 +58,19 @@ class StageCheckpoint:
         source: str,
         business_date: str,
         base_dir: Optional[str] = None,
+        scope_key: Optional[str] = None,
     ) -> None:
         self.source = source
         self.business_date = business_date
         root = base_dir or _default_checkpoint_root()
         safe_date = business_date.replace("/", "-").replace(":", "-")
-        self.directory = os.path.join(root, f"{source}_{safe_date}")
+        folder_name = f"{source}_{safe_date}"
+        if scope_key:
+            digest = hashlib.sha256(
+                os.path.normcase(os.path.abspath(scope_key)).encode("utf-8")
+            ).hexdigest()[:8]
+            folder_name = f"{folder_name}_{digest}"
+        self.directory = os.path.join(root, folder_name)
         self.manifest_path = os.path.join(self.directory, "manifest.json")
         self._manifest: Dict[str, Any] = self._load_manifest()
 

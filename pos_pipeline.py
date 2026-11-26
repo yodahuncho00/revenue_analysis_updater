@@ -69,6 +69,7 @@ def run_pos_pipeline(
         source="pos",
         business_date=str(effective_today),
         base_dir=paths.get("checkpoints_dir"),
+        scope_key=workbook_path,
     )
 
     manager = CopyManager(

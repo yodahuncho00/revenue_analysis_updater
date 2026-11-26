@@ -912,6 +912,13 @@ class GoogleSheetsSync:
             ]
             if any(len(row) != len(headers) for row in rows):
                 raise ValueError("POS payment data has an unexpected number of columns.")
+            # Guarantee column B (Datetime) has DD.MM.YYYY on every synced data row even if
+            # the workbook had fewer pre-formatted rows than `rows`.
+            for row_offset, row in enumerate(rows):
+                if len(row) > 1 and isinstance(row[1], (datetime, date)):
+                    cell = worksheet.cell(4 + row_offset, 2)
+                    if not cell.number_format or cell.number_format.casefold() == "general":
+                        cell.number_format = "DD.MM.YYYY"
             self._replace_sheet_range(
                 spreadsheet_id,
                 target_sheets[sheet_name],

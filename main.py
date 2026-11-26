@@ -171,14 +171,15 @@ def _run_backoffice_pipeline(
     }
     logger.info(f"Calculated date range: from={from_date}, to={to_date}, rpt_month_end={rpt_month_end}")
 
+    prod_path = config["paths"]["workbook_path"]
     checkpoint = StageCheckpoint(
         source="backoffice",
         business_date=effective_today_str,
         base_dir=config.get("paths", {}).get("checkpoints_dir"),
+        scope_key=prod_path,
     )
 
     # 3. Pre-flight checks & Copy Manager
-    prod_path = config["paths"]["workbook_path"]
     copy_mgr = CopyManager(
         prod_path=prod_path,
         backup_dir=config["paths"]["backup_dir"],
