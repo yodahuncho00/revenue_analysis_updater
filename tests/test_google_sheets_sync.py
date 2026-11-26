@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import certifi
 import openpyxl
@@ -70,19 +70,164 @@ class _Sheets:
 
 
 def _sync(tmp_path, drive, sheets):
-    key_path = tmp_path / "service-account.json"
-    key_path.write_text("test-only", encoding="utf-8")
     return GoogleSheetsSync(
         {
             "_project_root": str(tmp_path),
             "google_sheets": {
                 "folder_id": "drive-folder",
-                "service_account_file": str(key_path),
             },
         },
         drive_service=drive,
         sheets_service=sheets,
     )
+
+
+def test_oauth_user_authorizes_once_and_reuses_saved_token(monkeypatch, tmp_path):
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    client_path = tmp_path / "oauth-client.json"
+    client_path.write_text("test-only", encoding="utf-8")
+    token_path = tmp_path / "private" / "oauth-token.json"
+    flow_calls = []
+
+    class Flow:
+        def __init__(self):
+            self.oauth2session = type("OAuthSession", (), {})()
+
+        @classmethod
+        def from_client_secrets_file(cls, client_file, scopes):
+            assert client_file == str(client_path)
+            assert tuple(scopes) == google_sheets_sync.SCOPES
+            return cls()
+
+        def run_local_server(self, *, port, access_type, prompt, timeout_seconds):
+            flow_calls.append((port, access_type, prompt, timeout_seconds))
+            assert access_type == "offline"
+            assert prompt == "select_account consent"
+            assert timeout_seconds == google_sheets_sync.OAUTH_INTERACTIVE_TIMEOUT_SECONDS
+            return Credentials(
+                token="access-token",
+                refresh_token="refresh-token",
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id="test-client",
+                client_secret="test-secret",
+                scopes=google_sheets_sync.SCOPES,
+                expiry=datetime.now() + timedelta(days=1),
+            )
+
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", Flow.from_client_secrets_file)
+    monkeypatch.setattr(
+        google_sheets_sync, "_google_ca_bundle", lambda *_args: str(tmp_path)
+    )
+    settings = {
+        "oauth_client_file": str(client_path),
+        "oauth_token_file": str(token_path),
+    }
+
+    first_credentials = google_sheets_sync._oauth_user_credentials(
+        settings, str(tmp_path), allow_interactive=True
+    )
+    second_credentials = google_sheets_sync._oauth_user_credentials(
+        settings, str(tmp_path), allow_interactive=False
+    )
+
+    assert first_credentials.valid
+    assert second_credentials.refresh_token == "refresh-token"
+    assert len(flow_calls) == 1
+    assert token_path.is_file()
+    assert not list(token_path.parent.glob("google-oauth-*.json"))
+
+
+def test_oauth_user_fails_fast_when_non_interactive_and_token_missing(monkeypatch, tmp_path):
+    client_path = tmp_path / "oauth-client.json"
+    client_path.write_text("test-only", encoding="utf-8")
+    token_path = tmp_path / "private" / "missing-token.json"
+    monkeypatch.setattr(
+        google_sheets_sync, "_google_ca_bundle", lambda *_args: str(tmp_path)
+    )
+    settings = {
+        "oauth_client_file": str(client_path),
+        "oauth_token_file": str(token_path),
+    }
+
+    try:
+        google_sheets_sync._oauth_user_credentials(
+            settings, str(tmp_path), allow_interactive=False
+        )
+    except RuntimeError as exc:
+        assert "authorize_google_sheets.py" in str(exc)
+        assert "interactive login is disabled" in str(exc)
+    else:
+        raise AssertionError("Expected fail-fast RuntimeError when token is missing in non-interactive mode.")
+
+
+def test_oauth_user_rejects_interactive_grant_without_refresh_token(monkeypatch, tmp_path):
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    client_path = tmp_path / "oauth-client.json"
+    client_path.write_text("test-only", encoding="utf-8")
+    token_path = tmp_path / "private" / "oauth-token.json"
+
+    class NoRefreshFlow:
+        def __init__(self):
+            self.oauth2session = type("OAuthSession", (), {})()
+
+        @classmethod
+        def from_client_secrets_file(cls, client_file, scopes):
+            return cls()
+
+        def run_local_server(self, **_kwargs):
+            return Credentials(
+                token="short-lived-only",
+                refresh_token=None,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id="test-client",
+                client_secret="test-secret",
+                scopes=google_sheets_sync.SCOPES,
+                expiry=datetime.now() + timedelta(hours=1),
+            )
+
+    monkeypatch.setattr(
+        InstalledAppFlow, "from_client_secrets_file", NoRefreshFlow.from_client_secrets_file
+    )
+    monkeypatch.setattr(
+        google_sheets_sync, "_google_ca_bundle", lambda *_args: str(tmp_path)
+    )
+    settings = {
+        "oauth_client_file": str(client_path),
+        "oauth_token_file": str(token_path),
+    }
+
+    try:
+        google_sheets_sync._oauth_user_credentials(
+            settings, str(tmp_path), allow_interactive=True
+        )
+    except RuntimeError as exc:
+        assert "refresh_token" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when Google omits refresh_token.")
+    assert not token_path.exists()
+
+
+def test_oauth_refresh_retries_transient_network_errors(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(google_sheets_sync.time_module, "sleep", lambda _: None)
+
+    class FlakyCreds:
+        def __init__(self):
+            self.calls = 0
+
+        def refresh(self, _request):
+            self.calls += 1
+            if self.calls < 3:
+                raise requests.exceptions.ConnectionError("temporary reset")
+
+    creds = FlakyCreds()
+    google_sheets_sync._refresh_oauth_credentials(creds, "dummy-ca.pem")
+    assert creds.calls == 3
 
 
 def test_pos_sync_replaces_a3_r_and_copies_cell_format(tmp_path):

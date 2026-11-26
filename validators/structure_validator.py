@@ -1,4 +1,5 @@
 import os
+import time
 import openpyxl
 from typing import Dict, Any, List
 
@@ -116,14 +117,25 @@ class WorkbookStructureValidator:
         if not os.path.exists(workbook_path):
             raise StructureValidationError(f"Target workbook does not exist: {workbook_path}")
 
-        try:
-            # Check read access
-            with open(workbook_path, "rb") as f:
-                f.read(100)
-        except PermissionError as e:
-            raise StructureValidationError(f"Workbook is locked or currently open in Excel: {e}")
-        except Exception as e:
-            raise StructureValidationError(f"Cannot access workbook: {e}")
+        last_perm_err = None
+        for attempt in range(4):
+            try:
+                # Check read + non-destructive write-share access (catches open Excel early,
+                # while tolerating a brief OneDrive sync tick).
+                with open(workbook_path, "r+b") as f:
+                    f.read(100)
+                last_perm_err = None
+                break
+            except PermissionError as e:
+                last_perm_err = e
+                if attempt < 3:
+                    time.sleep(1.0)
+            except Exception as e:
+                raise StructureValidationError(f"Cannot access workbook: {e}")
+        if last_perm_err is not None:
+            raise StructureValidationError(
+                f"Workbook is locked or currently open in Excel: {last_perm_err}"
+            )
 
         # Load workbook (read-only mode is fast and doesn't mutate)
         try:

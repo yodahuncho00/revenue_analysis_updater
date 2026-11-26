@@ -2,7 +2,7 @@ import os
 import json
 import time
 import hashlib
-import json
+import logging
 import re
 import csv
 import io
@@ -10,11 +10,17 @@ import calendar
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Iterator
-from urllib.parse import parse_qs, urlparse
+from typing import Callable, List, Dict, Any, Optional, Iterator, TypeVar
+from urllib.parse import parse_qsl, parse_qs, urlencode, urlparse, urlsplit, urlunsplit
 from extractors.base import BaseExtractor, BalanceTableCapture
 
+T = TypeVar("T")
+
 class PlaywrightExtractionError(Exception):
+    pass
+
+class PlaywrightAuthenticationError(PlaywrightExtractionError):
+    """Raised when interactive login or OTP refresh is required (non-retryable)."""
     pass
 
 class PlaywrightExtractor(BaseExtractor):
@@ -59,7 +65,12 @@ class PlaywrightExtractor(BaseExtractor):
         "partner_revenue",
     )
 
-    def __init__(self, config: Dict[str, Any], raw_storage_dir: Optional[str] = None):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        raw_storage_dir: Optional[str] = None,
+        logger: Optional[logging.Logger] = None,
+    ):
         self.config = config
         self.bo_cfg = config.get("backoffice", {})
         self.routes = self.bo_cfg.get("routes", {})
@@ -69,6 +80,119 @@ class PlaywrightExtractor(BaseExtractor):
             "%LOCALAPPDATA%\\RevenueAnalysisUpdater\\BackofficeProfile",
         )
         self.raw_storage_dir = raw_storage_dir
+        self.logger = logger
+        self._playwright_cm = None
+        self._playwright = None
+        self._shared_context = None
+
+    def open_session(self) -> "PlaywrightExtractor":
+        """Launch one persistent/authenticated browser context shared across extraction steps."""
+        if self._shared_context is not None:
+            return self
+        from playwright.sync_api import sync_playwright
+
+        self._playwright_cm = sync_playwright()
+        self._playwright = self._playwright_cm.__enter__()
+        try:
+            self._shared_context = self.launch_persistent_context(self._playwright)
+        except Exception:
+            self._playwright_cm.__exit__(None, None, None)
+            self._playwright_cm = None
+            self._playwright = None
+            raise
+        return self
+
+    def close_session(self) -> None:
+        """Close any shared browser context and Playwright runtime cleanly."""
+        context = self._shared_context
+        self._shared_context = None
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
+        cm = self._playwright_cm
+        self._playwright_cm = None
+        self._playwright = None
+        if cm is not None:
+            try:
+                cm.__exit__(None, None, None)
+            except Exception:
+                pass
+
+    def __enter__(self) -> "PlaywrightExtractor":
+        return self.open_session()
+
+    def __exit__(self, _exc_type: Any, _exc_val: Any, _exc_tb: Any) -> None:
+        self.close_session()
+
+    @staticmethod
+    def _is_non_retryable_extraction_error(exc: Exception) -> bool:
+        if isinstance(exc, PlaywrightAuthenticationError):
+            return True
+        if isinstance(exc, PlaywrightExtractionError):
+            msg = str(exc).lower()
+            non_retryable_markers = (
+                "authentication is required",
+                "login or verification form",
+                "login was not confirmed",
+                "redirected away from payments",
+                "route is not configured",
+                "invalid ",
+                "headers do not match",
+                "missing columns",
+                "duplicate column",
+                "duplicate transaction ids",
+                "not valid utf-8",
+                "extra fields",
+                "missing fields",
+                "incomplete row",
+                "absent from the filtered api",
+                "not in excluded state 3",
+                "could not resolve paths.browser_profile_dir",
+            )
+            return any(marker in msg for marker in non_retryable_markers)
+        return False
+
+    def _extract_with_retry(self, step_name: str, operation: Callable[[], T]) -> T:
+        """Execute an extraction step with bounded backoff retries on transient browser errors."""
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+        browser_cfg = self.bo_cfg.get("browser", {})
+        max_attempts = max(1, int(browser_cfg.get("step_retry_attempts", 3)))
+        base_delay = float(browser_cfg.get("step_retry_delay_seconds", 2.0))
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return operation()
+            except Exception as exc:
+                if self._is_non_retryable_extraction_error(exc):
+                    raise
+                is_transient = isinstance(
+                    exc, (PlaywrightTimeoutError, PlaywrightError, PlaywrightExtractionError)
+                )
+                if not is_transient or attempt >= max_attempts:
+                    raise
+                last_exc = exc
+                delay = base_delay * attempt
+                if self.logger:
+                    self.logger.warning(
+                        "%s extraction attempt %d/%d failed (%s); retrying in %.1fs...",
+                        step_name,
+                        attempt,
+                        max_attempts,
+                        exc,
+                        delay,
+                    )
+                # If the shared browser context became unhealthy, recreate it before retrying.
+                if self._shared_context is not None and isinstance(exc, PlaywrightError):
+                    self.close_session()
+                    self.open_session()
+                time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def launch_persistent_context(
         self, playwright: Any, headless: Optional[bool] = None
@@ -174,7 +298,7 @@ class PlaywrightExtractor(BaseExtractor):
             )
             for index in range(auth_inputs.count()):
                 if auth_inputs.nth(index).is_visible():
-                    raise PlaywrightExtractionError(
+                    raise PlaywrightAuthenticationError(
                         f"Backoffice is showing a login or verification form "
                         f"(current page: {page_url}). Refresh the saved session with "
                         "'python scripts\\refresh_backoffice_session.py', then retry."
@@ -187,7 +311,7 @@ class PlaywrightExtractor(BaseExtractor):
                 )
                 if signed_in_marker.count() and signed_in_marker.first.is_visible():
                     return
-            raise PlaywrightExtractionError(
+            raise PlaywrightAuthenticationError(
                 f"Backoffice authentication is required (current page: {page_url}). "
                 "Refresh the saved session with "
                 "'python scripts\\refresh_backoffice_session.py', then retry."
@@ -627,10 +751,31 @@ class PlaywrightExtractor(BaseExtractor):
         return raw_path
 
     @contextmanager
+    def _browser_context(self) -> Iterator[Any]:
+        """Yield the shared browser context when open, or launch a scoped one."""
+        if self._shared_context is not None:
+            yield self._shared_context
+            return
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            context = self.launch_persistent_context(playwright)
+            try:
+                yield context
+            finally:
+                context.close()
+
+    @contextmanager
     def _authenticated_page(
-        self, playwright: Any, url: str, response_handler: Any = None
+        self, playwright: Any = None, url: str = "", response_handler: Any = None
     ) -> Iterator[Any]:
-        context = self.launch_persistent_context(playwright)
+        owns_context = False
+        if self._shared_context is not None:
+            context = self._shared_context
+        else:
+            context = self.launch_persistent_context(playwright)
+            owns_context = True
+        page = None
         try:
             page = context.new_page()
             if response_handler is not None:
@@ -645,7 +790,22 @@ class PlaywrightExtractor(BaseExtractor):
             self._assert_authenticated(page)
             yield page
         finally:
-            context.close()
+            if page is not None:
+                if response_handler is not None and hasattr(page, "remove_listener"):
+                    try:
+                        page.remove_listener("response", response_handler)
+                    except Exception:
+                        pass
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception:
+                    pass
+            if owns_context:
+                try:
+                    context.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _read_table_rows(page: Any) -> List[Dict[str, Any]]:
@@ -1008,13 +1168,18 @@ class PlaywrightExtractor(BaseExtractor):
         Navigates to Dashboard, sets From/To date filter, ensures 'Show in USD' is OFF,
         intercepts JSON response or scrapes table.
         """
-        from playwright.sync_api import sync_playwright
-
         url = self.routes.get("dashboard")
         if not url:
             raise PlaywrightExtractionError("Backoffice dashboard route is not configured.")
-        with sync_playwright() as p:
-            context = self.launch_persistent_context(p)
+        return self._extract_with_retry(
+            "Dashboard",
+            lambda: self._extract_dashboard_once(url, from_date, to_date),
+        )
+
+    def _extract_dashboard_once(
+        self, url: str, from_date: date, to_date: date
+    ) -> List[Dict[str, Any]]:
+        with self._browser_context() as context:
             page = context.new_page()
             try:
                 page.goto(
@@ -1096,17 +1261,33 @@ class PlaywrightExtractor(BaseExtractor):
                 })
                 return captured_data
             finally:
-                context.close()
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception:
+                    pass
 
     def extract_merchant_balance(self) -> BalanceTableCapture:
-        from playwright.sync_api import sync_playwright
-
         url = self.routes.get("merchant_balance")
         if not url:
             raise PlaywrightExtractionError("Merchant Balance route is not configured.")
+        return self._extract_with_retry(
+            "Merchant Balance",
+            lambda: self._extract_merchant_balance_once(url),
+        )
 
-        with sync_playwright() as playwright:
-            with self._authenticated_page(playwright, url) as page:
+    def _extract_merchant_balance_once(self, url: str) -> BalanceTableCapture:
+        with self._browser_context() as context:
+            page = context.new_page()
+            try:
+                page.goto(
+                    url,
+                    wait_until="commit",
+                    timeout=self.bo_cfg.get("browser", {}).get(
+                        "navigation_timeout_ms", 60000
+                    ),
+                )
+                self._assert_authenticated(page)
                 self._wait_for_backoffice_ready(
                     page,
                     page.get_by_role(
@@ -1133,30 +1314,52 @@ class PlaywrightExtractor(BaseExtractor):
                     "column_count": capture.column_count,
                 })
                 return capture
+            finally:
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception:
+                    pass
 
     def extract_provider_balance(self) -> BalanceTableCapture:
-        from playwright.sync_api import sync_playwright
-
         url = self.routes.get("provider_balance")
         if not url:
             raise PlaywrightExtractionError("Provider Balance route is not configured.")
+        return self._extract_with_retry(
+            "Provider Balance",
+            lambda: self._extract_provider_balance_once(url),
+        )
 
+    def _extract_provider_balance_once(self, url: str) -> BalanceTableCapture:
         api_responses = []
+        api_errors = []
 
         def capture_provider_response(response: Any) -> None:
-            if urlparse(response.url).path.rstrip("/").endswith(
-                "/api/v1/providers-balance/accounts"
-            ):
-                if not response.ok:
-                    raise PlaywrightExtractionError(
-                        f"Provider Balance data request failed with HTTP {response.status}."
-                    )
-                api_responses.append(response.json())
+            try:
+                if urlparse(response.url).path.rstrip("/").endswith(
+                    "/api/v1/providers-balance/accounts"
+                ):
+                    if not response.ok:
+                        api_errors.append(
+                            f"Provider Balance data request failed with HTTP {response.status}."
+                        )
+                        return
+                    api_responses.append(response.json())
+            except Exception as exc:
+                api_errors.append(f"Provider Balance response parse failed: {exc}")
 
-        with sync_playwright() as playwright:
-            with self._authenticated_page(
-                playwright, url, response_handler=capture_provider_response
-            ) as page:
+        with self._browser_context() as context:
+            page = context.new_page()
+            page.on("response", capture_provider_response)
+            try:
+                page.goto(
+                    url,
+                    wait_until="commit",
+                    timeout=self.bo_cfg.get("browser", {}).get(
+                        "navigation_timeout_ms", 60000
+                    ),
+                )
+                self._assert_authenticated(page)
                 self._wait_for_backoffice_ready(
                     page,
                     page.get_by_role(
@@ -1164,13 +1367,15 @@ class PlaywrightExtractor(BaseExtractor):
                     ).first,
                     "Provider Balance",
                 )
-                page.wait_for_selector("tbody tr.account-row")
+                self._wait_for_balance_table(page, "Provider Balance")
                 self._scroll_balance_table_to_end(page)
-                if len(api_responses) != 1:
+                if not api_responses:
+                    if api_errors:
+                        raise PlaywrightExtractionError(api_errors[-1])
                     raise PlaywrightExtractionError(
-                        "Provider Balance did not return exactly one complete account data response."
+                        "Provider Balance did not return a complete account data response."
                     )
-                accounts = api_responses[0].get("accounts")
+                accounts = api_responses[-1].get("accounts")
                 if not isinstance(accounts, list) or not accounts:
                     raise PlaywrightExtractionError(
                         "Provider Balance data response has no account list."
@@ -1274,6 +1479,17 @@ class PlaywrightExtractor(BaseExtractor):
                     "source": "Backoffice provider balance accounts API",
                 })
                 return capture
+            finally:
+                if hasattr(page, "remove_listener"):
+                    try:
+                        page.remove_listener("response", capture_provider_response)
+                    except Exception:
+                        pass
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception:
+                    pass
 
     def extract_settlements(self, from_date: date, to_date: date) -> List[Dict[str, Any]]:
         return self._extract_transactions("settlements", from_date, to_date, "settlements")
@@ -1281,36 +1497,52 @@ class PlaywrightExtractor(BaseExtractor):
     def extract_topups(self, from_date: date, to_date: date) -> List[Dict[str, Any]]:
         return self._extract_transactions("top_ups", from_date, to_date, "topups")
 
+    @staticmethod
+    def _pos_all_time_url(base_url: str) -> str:
+        """Ensure period=all is set in the POS Payments URL before navigation."""
+        split = urlsplit(base_url)
+        params = [(k, v) for k, v in parse_qsl(split.query, keep_blank_values=True) if k != "period"]
+        params.append(("period", "all"))
+        return urlunsplit((split.scheme, split.netloc, split.path, urlencode(params), split.fragment))
+
     def extract_pos_payments(self) -> List[List[Any]]:
         """Download the full POS Payments CSV and sort it for BO_extract."""
-        from playwright.sync_api import sync_playwright
+        return self._extract_with_retry(
+            "POS Payments",
+            self._extract_pos_payments_once,
+        )
 
+    def _extract_pos_payments_once(self) -> List[List[Any]]:
         pos_cfg = self.config.get("pos_portal", {})
-        url = pos_cfg.get("payments_url", "https://pos-portal.unipesa.tech/payments")
+        base_url = pos_cfg.get("payments_url", "https://pos-portal.unipesa.tech/payments")
+        target_url = self._pos_all_time_url(base_url)
         browser_cfg = pos_cfg.get("browser", self.bo_cfg.get("browser", {}))
         timeout = browser_cfg.get("navigation_timeout_ms", 60000)
+        ui_timeout = browser_cfg.get("timeout_ms", 30000)
         content = None
-        with sync_playwright() as playwright:
-            context = self.launch_persistent_context(playwright)
+        with self._browser_context() as context:
+            page = context.new_page()
             try:
-                page = context.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-                self._assert_pos_authenticated(page)
+                page.goto(target_url, wait_until="domcontentloaded", timeout=timeout)
+                self._assert_pos_authenticated(page, timeout_ms=ui_timeout)
 
-                # Locate and click 'All time' filter
-                all_time = page.get_by_role("button", name=re.compile(r"All\s*time", re.I)).first
-                if not all_time.is_visible():
-                    all_time = page.locator("button, [role='button'], [role='tab'], a").filter(
-                        has_text=re.compile(r"^All\s*time$", re.I)
-                    ).first
-                all_time.wait_for(state="visible", timeout=browser_cfg.get("timeout_ms", 30000))
-                if "period=all" not in page.url:
+                # Confirm 'All time' (period=all) is active; click fallback if portal dropped it.
+                if parse_qs(urlparse(page.url).query).get("period") != ["all"]:
+                    all_time = page.get_by_role("button", name=re.compile(r"All\s*time", re.I)).first
+                    if not all_time.is_visible():
+                        all_time = page.locator("button, [role='button'], [role='tab'], a").filter(
+                            has_text=re.compile(r"^All\s*time$", re.I)
+                        ).first
+                    all_time.wait_for(state="visible", timeout=ui_timeout)
                     all_time.click()
-                try:
                     page.wait_for_function(
                         "new URL(location.href).searchParams.get('period') === 'all'",
-                        timeout=5000,
+                        timeout=ui_timeout,
                     )
+
+                # Give the portal a brief chance to settle its filtered data request before exporting.
+                try:
+                    page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:
                     pass
 
@@ -1320,7 +1552,7 @@ class PlaywrightExtractor(BaseExtractor):
                     save_csv = page.locator("button, [role='button'], a").filter(
                         has_text=re.compile(r"Save\s*CSV", re.I)
                     ).first
-                save_csv.wait_for(state="visible", timeout=browser_cfg.get("timeout_ms", 30000))
+                save_csv.wait_for(state="visible", timeout=ui_timeout)
                 with page.expect_download(timeout=pos_cfg.get("download_timeout_ms", 120000)) as info:
                     save_csv.click()
                 downloaded = info.value.path()
@@ -1329,7 +1561,11 @@ class PlaywrightExtractor(BaseExtractor):
                 content = Path(downloaded).read_bytes()
                 source_url = page.url
             finally:
-                context.close()
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception:
+                    pass
 
         try:
             text = content.decode("utf-8-sig")
@@ -1420,15 +1656,21 @@ class PlaywrightExtractor(BaseExtractor):
     def _assert_pos_authenticated(page: Any, timeout_ms: int = 30000) -> None:
         try:
             if urlparse(page.url).hostname != "pos-portal.unipesa.tech":
-                raise PlaywrightExtractionError("The POS Portal redirected away from Payments.")
+                raise PlaywrightAuthenticationError("The POS Portal redirected away from Payments.")
+            if re.search(r"/(login|auth|sign[-_]?in)(/|$)", urlparse(page.url).path, re.IGNORECASE):
+                raise PlaywrightAuthenticationError(
+                    f"POS Portal authentication is required (current page: {page.url})."
+                )
             save_csv = page.get_by_role("button", name=re.compile(r"Save\s*CSV", re.I)).first
             if not save_csv.is_visible():
                 save_csv = page.locator("button, [role='button'], a").filter(
                     has_text=re.compile(r"Save\s*CSV", re.I)
                 ).first
             save_csv.wait_for(state="visible", timeout=timeout_ms)
+        except PlaywrightAuthenticationError:
+            raise
         except Exception as exc:
-            raise PlaywrightExtractionError(
+            raise PlaywrightAuthenticationError(
                 "POS Portal login was not confirmed: Payments/Save CSV did not load. "
                 f"Current page: {page.url}."
             ) from exc
@@ -1440,8 +1682,6 @@ class PlaywrightExtractor(BaseExtractor):
         to_date: date,
         capture_name: str,
     ) -> List[Dict[str, Any]]:
-        from playwright.sync_api import sync_playwright
-
         url = self.routes.get(route_name)
         if not url:
             raise PlaywrightExtractionError(f"{capture_name.title()} route is not configured.")
@@ -1449,7 +1689,18 @@ class PlaywrightExtractor(BaseExtractor):
             raise PlaywrightExtractionError(
                 f"Invalid {capture_name} date range: {from_date} is after {to_date}."
             )
+        return self._extract_with_retry(
+            capture_name.title(),
+            lambda: self._extract_transactions_once(url, from_date, to_date, capture_name),
+        )
 
+    def _extract_transactions_once(
+        self,
+        url: str,
+        from_date: date,
+        to_date: date,
+        capture_name: str,
+    ) -> List[Dict[str, Any]]:
         route_path = urlparse(url).path
         expected_filters = {
             "date": {
@@ -1457,19 +1708,30 @@ class PlaywrightExtractor(BaseExtractor):
                 "lt": f"{to_date:%Y-%m-%d} 23:59:59.999",
             }
         }
-        with sync_playwright() as playwright:
-            route_responses = []
+        route_responses = []
 
-            def capture_route_response(response: Any) -> None:
+        def capture_route_response(response: Any) -> None:
+            try:
                 if (
                     urlparse(response.url).path == route_path
                     and response.request.resource_type in ("fetch", "xhr")
                 ):
                     route_responses.append(response)
+            except Exception:
+                pass
 
-            with self._authenticated_page(
-                playwright, url, response_handler=capture_route_response
-            ) as page:
+        with self._browser_context() as context:
+            page = context.new_page()
+            page.on("response", capture_route_response)
+            try:
+                page.goto(
+                    url,
+                    wait_until="commit",
+                    timeout=self.bo_cfg.get("browser", {}).get(
+                        "navigation_timeout_ms", 60000
+                    ),
+                )
+                self._assert_authenticated(page)
                 timeout = self.bo_cfg.get("browser", {}).get(
                     "transaction_response_timeout_ms", 120000
                 )
@@ -1533,7 +1795,9 @@ class PlaywrightExtractor(BaseExtractor):
                         ) from exc
                     transactions = self._transaction_payload(next_response_info.value, page_number)
                     next_body = next_response_info.value.json()
-                    if next_body.get("props", {}).get("filters", {}) != expected_filters:
+                    if self._normalize_date_filters(
+                        next_body.get("props", {}).get("filters", {})
+                    ) != self._normalize_date_filters(expected_filters):
                         raise PlaywrightExtractionError(
                             f"{capture_name.title()} page {page_number} returned different filters."
                         )
@@ -1597,3 +1861,14 @@ class PlaywrightExtractor(BaseExtractor):
                     "show_in_usd": None,
                 })
                 return normalized
+            finally:
+                if hasattr(page, "remove_listener"):
+                    try:
+                        page.remove_listener("response", capture_route_response)
+                    except Exception:
+                        pass
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception:
+                    pass

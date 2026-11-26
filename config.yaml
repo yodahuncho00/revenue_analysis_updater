@@ -25,7 +25,9 @@ paths:
 google_sheets:
   enabled: true
   folder_id: "1aL7KFzHT2nSY4HA9LUmNLu19agJs78KH"
-  service_account_file: "payrollkz-09683128fc5a.json"
+  auth_type: "oauth_user"
+  oauth_client_file: "%LOCALAPPDATA%\\RevenueAnalysisUpdater\\oauth_client.json"
+  oauth_token_file: "%LOCALAPPDATA%\\RevenueAnalysisUpdater\\google_oauth_token.json"
   gateway_spreadsheet_name: "Backoffice_Gateway"
   pos_spreadsheet_name: "Backoffice_POS"
   gateway_tabs:

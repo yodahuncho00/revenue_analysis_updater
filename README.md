@@ -58,14 +58,21 @@ formatting. Dry runs and single-step Gateway runs do not sync. If the Google
 update fails, the local workbook remains committed and the run reports failure
 so the remote copy can be checked.
 
-The service-account key must be provisioned locally as
-`payrollkz-09683128fc5a.json` (or update `google_sheets.service_account_file`
-in `config.yaml`). Never commit or send this key. Share the Drive folder with
-the service account as an Editor and enable the Google Drive API and Google
-Sheets API in its Google Cloud project. The integration uses the configured
-folder and spreadsheet names in `config.yaml`. HTTPS verification uses certifi's
-CA bundle plus Windows' trusted root certificates by default. A custom
-`google_sheets.ca_bundle` PEM path can override this; verification remains enabled.
+Google Sheets uses user OAuth. Enable the Google Drive API and Google Sheets API
+in the approved Cloud project, create a Desktop OAuth client, and place its JSON
+at the path configured by `google_sheets.oauth_client_file`. Before running the
+ETL, authorize the account with `python scripts/authorize_google_sheets.py`; a
+browser opens for sign-in. If the helper is skipped, the first full ETL run
+opens the browser instead. The resulting refresh token is saved to
+`google_sheets.oauth_token_file` and reused for later runs.
+Keep both files in the user's local application-data directory; never commit or
+send them. The authorizing account needs Editor access to the configured Drive
+folder and spreadsheets. If the saved token is revoked, remove that token file
+and run the ETL interactively to authorize again. The integration uses the
+configured folder and spreadsheet names in `config.yaml`. HTTPS verification
+uses certifi's CA bundle plus Windows' trusted root certificates by default. A
+custom `google_sheets.ca_bundle` PEM path can override this; verification remains
+enabled.
 
 ## Keep one runner per workbook
 

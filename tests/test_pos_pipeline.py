@@ -191,6 +191,9 @@ def test_pos_pipeline_row_replacement_preserves_formulas(tmp_path, monkeypatch):
             "pos_dashboard_template_path": str(template_path),
             "backup_dir": str(tmp_path / "backups"),
             "raw_dir": str(tmp_path / "raw"),
+            "logs_dir": str(tmp_path / "logs"),
+            "reports_dir": str(tmp_path / "reports"),
+            "checkpoints_dir": str(tmp_path / "checkpoints"),
         },
         "app": {"backups_to_retain": 5},
     }

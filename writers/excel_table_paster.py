@@ -1,22 +1,210 @@
+"""Write captured balance tables directly to Excel via openpyxl (no COM / clipboard)."""
+
+from copy import copy
+from decimal import Decimal, InvalidOperation
+from html.parser import HTMLParser
 import os
 import re
-import sys
 import time
-from decimal import Decimal, InvalidOperation
-from typing import Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import pywintypes
-import win32clipboard
-import win32con
-import win32com.client
 import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from extractors.base import BalanceTableCapture
 
 
+_NAMED_COLORS: Dict[str, str] = {
+    "black": "000000",
+    "white": "FFFFFF",
+    "red": "FF0000",
+    "green": "008000",
+    "blue": "0000FF",
+    "yellow": "FFFF00",
+    "cyan": "00FFFF",
+    "magenta": "FF00FF",
+    "gray": "808080",
+    "grey": "808080",
+    "lightgray": "D3D3D3",
+    "lightgrey": "D3D3D3",
+    "darkgray": "A9A9A9",
+    "darkgrey": "A9A9A9",
+    "orange": "FFA500",
+    "silver": "C0C0C0",
+    "navy": "000080",
+    "teal": "008080",
+    "purple": "800080",
+    "maroon": "800000",
+}
+
+
+def _parse_css_declarations(style_text: str) -> Dict[str, str]:
+    declarations: Dict[str, str] = {}
+    if not style_text:
+        return declarations
+    for part in style_text.split(";"):
+        if ":" not in part:
+            continue
+        key, value = part.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            declarations[key] = value
+    return declarations
+
+
+def _parse_css_color(value: Optional[str]) -> Optional[str]:
+    """Convert a CSS color string to an uppercase 6-char RGB hex (alpha blended onto white)."""
+    if not value:
+        return None
+    text = value.strip().lower()
+    if text in ("none", "transparent", "inherit", "initial"):
+        return None
+    if text in _NAMED_COLORS:
+        return _NAMED_COLORS[text]
+
+    hex_match = re.fullmatch(r"#([0-9a-f]{3}|[0-9a-f]{6})", text)
+    if hex_match:
+        raw = hex_match.group(1)
+        if len(raw) == 3:
+            raw = "".join(ch * 2 for ch in raw)
+        return raw.upper()
+
+    rgb_match = re.fullmatch(
+        r"rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)",
+        text,
+    )
+    if rgb_match:
+        r = max(0.0, min(255.0, float(rgb_match.group(1))))
+        g = max(0.0, min(255.0, float(rgb_match.group(2))))
+        b = max(0.0, min(255.0, float(rgb_match.group(3))))
+        alpha = float(rgb_match.group(4)) if rgb_match.group(4) is not None else 1.0
+        if alpha <= 0.0:
+            return None
+        if alpha < 1.0:
+            r = r * alpha + 255.0 * (1.0 - alpha)
+            g = g * alpha + 255.0 * (1.0 - alpha)
+            b = b * alpha + 255.0 * (1.0 - alpha)
+        return f"{round(r):02X}{round(g):02X}{round(b):02X}"
+    return None
+
+
+def _parse_css_font_size(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return None
+    text = value.strip().lower()
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(px|pt)", text)
+    if not match:
+        return None
+    amount = float(match.group(1))
+    unit = match.group(2)
+    return round(amount * 0.75, 2) if unit == "px" else round(amount, 2)
+
+
+def _parse_css_border_side(value: Optional[str]) -> Optional[Side]:
+    if not value:
+        return None
+    text = value.strip().lower()
+    if not text or "none" in text or re.search(r"\b0(?:px|pt)?\b", text):
+        return None
+    style = "thin"
+    if "double" in text:
+        style = "double"
+    elif "dashed" in text:
+        style = "dashed"
+    elif "dotted" in text:
+        style = "dotted"
+    else:
+        width_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*px", text)
+        if width_match:
+            px = float(width_match.group(1))
+            if px <= 0:
+                return None
+            if px >= 3:
+                style = "thick"
+            elif px >= 2:
+                style = "medium"
+    color_match = re.search(
+        r"(rgba?\([^)]+\)|#[0-9a-f]{3,6}|\b(?:" + "|".join(_NAMED_COLORS) + r")\b)",
+        text,
+    )
+    color_hex = _parse_css_color(color_match.group(1)) if color_match else None
+    return Side(style=style, color=f"FF{color_hex}" if color_hex else None)
+
+
+class _HTMLTableStyleParser(HTMLParser):
+    """Extract per-cell inline CSS style maps aligned to the expanded HTML table grid."""
+
+    def __init__(self, column_count: int) -> None:
+        super().__init__()
+        self.column_count = column_count
+        self.rows: List[List[Dict[str, str]]] = []
+        self._in_tbody = False
+        self._has_tbody = False
+        self._in_row = False
+        self._tr_style: Dict[str, str] = {}
+        self._current_row: List[Dict[str, str]] = []
+        self._current_col = 0
+        self._active_rowspans: Dict[int, Tuple[int, Dict[str, str]]] = {}
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        tag = tag.lower()
+        attr_map = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "tbody":
+            self._in_tbody = True
+            self._has_tbody = True
+            return
+        if tag == "tr":
+            if self._has_tbody and not self._in_tbody:
+                return
+            self._in_row = True
+            self._tr_style = _parse_css_declarations(attr_map.get("style", ""))
+            self._current_row = [{} for _ in range(self.column_count)]
+            self._current_col = 0
+            next_spans: Dict[int, Tuple[int, Dict[str, str]]] = {}
+            for col, (remaining, inherited_style) in self._active_rowspans.items():
+                if col < self.column_count:
+                    self._current_row[col] = dict(inherited_style)
+                if remaining > 1:
+                    next_spans[col] = (remaining - 1, inherited_style)
+            self._active_rowspans = next_spans
+            return
+        if tag in ("td", "th") and self._in_row:
+            while (
+                self._current_col < self.column_count
+                and self._current_row[self._current_col]
+            ):
+                self._current_col += 1
+            col_span = max(1, int(attr_map.get("colspan") or 1))
+            row_span = max(1, int(attr_map.get("rowspan") or 1))
+            cell_style = dict(self._tr_style)
+            cell_style.update(_parse_css_declarations(attr_map.get("style", "")))
+            for col in range(
+                self._current_col, min(self._current_col + col_span, self.column_count)
+            ):
+                self._current_row[col] = dict(cell_style)
+                if row_span > 1:
+                    self._active_rowspans[col] = (row_span - 1, dict(cell_style))
+            self._current_col += col_span
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "tbody":
+            self._in_tbody = False
+        elif tag == "tr" and self._in_row:
+            self.rows.append(self._current_row)
+            self._in_row = False
+
+
 class ExcelTablePaster:
-    """Paste captured HTML tables into the working workbook using Excel's HTML clipboard."""
+    """Write captured balance HTML tables directly into the workbook via openpyxl.
+
+    Historically this class pasted HTML through the Windows system clipboard and
+    Excel COM, which caused frequent clipboard and RPC failures. It now writes
+    values, numeric types, number formats, row heights, and inline CSS styles
+    directly with openpyxl (zero COM, zero clipboard).
+    """
 
     COM_RETRY_ATTEMPTS = 40
     COM_RETRY_DELAY_SECONDS = 0.25
@@ -29,45 +217,20 @@ class ExcelTablePaster:
         "BO_merchant_balance": (3, 6),
         "BO_provider_balance": (5, 8),
     }
+    AMOUNT_NUMBER_FORMAT = "#,##0.00;\\-#,##0.00;0"
     HELPER_FORMAT_COLUMNS = {
         "BO_merchant_balance": (9, 21),
         "BO_provider_balance": (11, 20),
     }
+    HELPER_NUMBER_FORMAT_CANONICAL = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
     HELPER_NUMBER_FORMAT_LOCAL = '_(* # ##0_);_(* (# ##0);_(* "-"??_);_(@_)'
     FIRST_FORMULA_ROW = 6
-    XL_LEFT = -4131
-    XL_RIGHT = -4152
-    XL_NONE = -4142
-
-    @staticmethod
-    def _clipboard_html(table_html: str) -> bytes:
-        start_marker = "<!--StartFragment-->"
-        end_marker = "<!--EndFragment-->"
-        html = f"<html><body>{start_marker}{table_html}{end_marker}</body></html>"
-        html_bytes = html.encode("utf-8")
-        header_template = (
-            "Version:0.9\r\n"
-            "StartHTML:{:010d}\r\n"
-            "EndHTML:{:010d}\r\n"
-            "StartFragment:{:010d}\r\n"
-            "EndFragment:{:010d}\r\n"
-        )
-        header = header_template.format(0, 0, 0, 0).encode("ascii")
-        start_html = len(header)
-        start_fragment = start_html + html_bytes.index(start_marker.encode("ascii")) + len(
-            start_marker
-        )
-        end_fragment = start_html + html_bytes.index(end_marker.encode("ascii"))
-        end_html = start_html + len(html_bytes)
-        header = header_template.format(
-            start_html, end_html, start_fragment, end_fragment
-        ).encode("ascii")
-        return header + html_bytes
+    DEFAULT_ROW_HEIGHT = 13
 
     @staticmethod
     def _cell_matrix(
         capture: BalanceTableCapture, *, normalize_line_breaks: bool = False
-    ):
+    ) -> Tuple[Tuple[str, ...], ...]:
         matrix = []
         active_rowspans: Dict[int, int] = {}
         for row in capture.rows:
@@ -118,65 +281,21 @@ class ExcelTablePaster:
         )
 
     @classmethod
-    def _set_clipboard(cls, capture: BalanceTableCapture) -> None:
-        html_format = win32clipboard.RegisterClipboardFormat("HTML Format")
-        last_error = None
-        for _ in range(20):
-            try:
-                win32clipboard.OpenClipboard()
-                break
-            except pywintypes.error as exc:
-                last_error = exc
-                time.sleep(0.05)
-        else:
-            raise RuntimeError("Could not open the Windows clipboard for Excel table paste.") from last_error
-
-        try:
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(
-                html_format,
-                cls._clipboard_html(
-                    re.sub(r"<br\b[^>]*>", " ", capture.html, flags=re.IGNORECASE)
-                ),
-            )
-            win32clipboard.SetClipboardData(
-                win32con.CF_UNICODETEXT, cls._plain_text(capture)
-            )
-        finally:
-            win32clipboard.CloseClipboard()
-
-    @classmethod
     def _retry_excel_call(cls, operation):
+        """Retained for backwards-compatibility with callers/tests referencing COM retry logic."""
+        try:
+            import pywintypes
+            com_error_type = pywintypes.com_error
+        except ImportError:
+            com_error_type = Exception
+
         for attempt in range(cls.COM_RETRY_ATTEMPTS):
             try:
                 return operation()
-            except pywintypes.com_error as exc:
-                if exc.args[0] != cls.RPC_E_CALL_REJECTED:
+            except com_error_type as exc:
+                if not exc.args or exc.args[0] != cls.RPC_E_CALL_REJECTED:
                     raise
                 if attempt == cls.COM_RETRY_ATTEMPTS - 1:
-                    raise
-                time.sleep(cls.COM_RETRY_DELAY_SECONDS)
-
-    @classmethod
-    def _paste_html_table(cls, worksheet, top_left, capture) -> None:
-        for attempt in range(3):
-            cls._set_clipboard(capture)
-            cls._retry_excel_call(lambda: worksheet.Select())
-            cls._retry_excel_call(lambda: top_left.Select())
-            try:
-                cls._retry_excel_call(
-                    lambda: worksheet.Paste(Destination=top_left)
-                )
-                return
-            except pywintypes.com_error as exc:
-                details = exc.args[2] if len(exc.args) > 2 else ()
-                is_excel_paste_failure = (
-                    isinstance(details, tuple)
-                    and len(details) > 5
-                    and details[1] == "Microsoft Excel"
-                    and details[-1] == -2146827284
-                )
-                if not is_excel_paste_failure or attempt == 2:
                     raise
                 time.sleep(cls.COM_RETRY_DELAY_SECONDS)
 
@@ -203,135 +322,124 @@ class ExcelTablePaster:
                 f"Unexpected balance amount from Backoffice: {value!r}."
             ) from exc
 
+    @staticmethod
+    def _parse_html_styles(capture: BalanceTableCapture) -> List[List[Dict[str, str]]]:
+        if not capture.html or capture.column_count <= 0:
+            return []
+        parser = _HTMLTableStyleParser(capture.column_count)
+        try:
+            parser.feed(capture.html)
+            parser.close()
+        except Exception:
+            return []
+        return parser.rows
+
+    @staticmethod
+    def _apply_css_style(cell: Any, css: Dict[str, str], wrap_text: bool) -> None:
+        if not css and not wrap_text:
+            return
+
+        # Font
+        font_kwargs: Dict[str, Any] = {}
+        weight = css.get("font-weight", "").strip().lower()
+        if weight == "bold" or (weight.isdigit() and int(weight) >= 600):
+            font_kwargs["bold"] = True
+        if css.get("font-style", "").strip().lower() == "italic":
+            font_kwargs["italic"] = True
+        font_size = _parse_css_font_size(css.get("font-size"))
+        if font_size is not None:
+            font_kwargs["size"] = font_size
+        font_family = css.get("font-family", "").split(",")[0].strip().strip("'\"")
+        if font_family:
+            font_kwargs["name"] = font_family
+        font_color = _parse_css_color(css.get("color"))
+        if font_color and font_color != "000000":
+            font_kwargs["color"] = f"FF{font_color}"
+        if font_kwargs:
+            base = cell.font
+            cell.font = Font(
+                name=font_kwargs.get("name", base.name),
+                size=font_kwargs.get("size", base.size),
+                bold=font_kwargs.get("bold", base.bold),
+                italic=font_kwargs.get("italic", base.italic),
+                color=font_kwargs.get("color", base.color),
+            )
+
+        # Fill
+        bg_hex = _parse_css_color(css.get("background-color"))
+        if bg_hex:
+            cell.fill = PatternFill(
+                fill_type="solid",
+                start_color=f"FF{bg_hex}",
+                end_color=f"FF{bg_hex}",
+            )
+
+        # Alignment
+        text_align = css.get("text-align", "").strip().lower()
+        horizontal = {
+            "left": "left",
+            "center": "center",
+            "right": "right",
+            "justify": "justify",
+        }.get(text_align)
+        v_align = css.get("vertical-align", "").strip().lower()
+        vertical = {
+            "top": "top",
+            "middle": "center",
+            "bottom": "bottom",
+        }.get(v_align)
+        if horizontal or vertical or wrap_text:
+            cell.alignment = Alignment(
+                horizontal=horizontal,
+                vertical=vertical,
+                wrap_text=True if wrap_text else None,
+            )
+
+        # Borders
+        border_sides = {}
+        for side_name in ("top", "right", "bottom", "left"):
+            side = _parse_css_border_side(css.get(f"border-{side_name}"))
+            if side is not None:
+                border_sides[side_name] = side
+        if border_sides:
+            cell.border = Border(**border_sides)
+
     @classmethod
-    def _write_numeric_amounts(
-        cls, worksheet, sheet_name, capture, top_row, first_column
+    def _unmerge_intersecting(
+        cls,
+        worksheet: Any,
+        min_row: int,
+        max_row: int,
+        min_col: int,
+        max_col: int,
     ) -> None:
-        amount_columns = cls.AMOUNT_COLUMNS.get(sheet_name)
-
-        if amount_columns is not None:
-            start_index, end_index = amount_columns
-            values = []
-            for row in capture.rows:
-                cells = row.get("cells", [])
-                if "headers-row" in row.get("row_class", "").split():
-                    values.append(
-                        tuple(
-                            cells[column] if column < len(cells) else ""
-                            for column in range(start_index, end_index)
-                        )
-                    )
-                    continue
-                values.append(
-                    tuple(
-                        cls._parse_amount(str(cells[column]))
-                        if column < len(cells) and str(cells[column]).strip()
-                        else ""
-                        for column in range(start_index, end_index)
-                    )
-                )
-
-            first_amount_column = get_column_letter(first_column + start_index)
-            last_amount_column = get_column_letter(first_column + end_index - 1)
-            amount_range = cls._retry_excel_call(
-                lambda: worksheet.Range(
-                    f"{first_amount_column}{top_row}:"
-                    f"{last_amount_column}{top_row + capture.row_count - 1}"
-                )
+        to_unmerge = [
+            str(cell_range)
+            for cell_range in list(worksheet.merged_cells.ranges)
+            if (
+                cell_range.min_row <= max_row
+                and cell_range.max_row >= min_row
+                and cell_range.min_col <= max_col
+                and cell_range.max_col >= min_col
             )
-            cls._retry_excel_call(
-                lambda: setattr(amount_range, "Value2", tuple(values))
-            )
-            cls._retry_excel_call(
-                lambda: setattr(
-                    amount_range,
-                    "NumberFormatLocal",
-                    "# ##0,00;-# ##0,00;0",
-                )
-            )
-
-    @classmethod
-    def _write_captured_cells(
-        cls, worksheet, top_row: int, first_column: int,
-        capture: BalanceTableCapture
-    ) -> None:
-        bottom_right = cls._retry_excel_call(
-            lambda: worksheet.Cells(
-                top_row + capture.row_count - 1,
-                first_column + capture.column_count - 1,
-            )
-        )
-        target_range = cls._retry_excel_call(
-            lambda: worksheet.Range(
-                worksheet.Cells(top_row, first_column), bottom_right
-            )
-        )
-        values = cls._cell_matrix(capture)
-        cls._retry_excel_call(
-            lambda: setattr(target_range, "Value2", values)
-        )
-
-        multiline_cells = [
-            (top_row + row_offset, first_column + column_offset)
-            for row_offset, row in enumerate(values)
-            for column_offset, value in enumerate(row)
-            if "\n" in value or "\r" in value
         ]
-        multiline_by_column: Dict[int, list[int]] = {}
-        for row, column in multiline_cells:
-            multiline_by_column.setdefault(column, []).append(row)
-        for column, rows in multiline_by_column.items():
-            row_runs = []
-            for row in rows:
-                if row_runs and row == row_runs[-1][1] + 1:
-                    row_runs[-1][1] = row
-                else:
-                    row_runs.append([row, row])
-            for first_row, last_row in row_runs:
-                cell_range = cls._retry_excel_call(
-                    lambda: worksheet.Range(
-                        worksheet.Cells(first_row, column),
-                        worksheet.Cells(last_row, column),
-                    )
-                )
-                cls._retry_excel_call(
-                    lambda: setattr(cell_range, "WrapText", True)
-                )
+        for range_ref in to_unmerge:
+            worksheet.unmerge_cells(range_ref)
 
     @classmethod
     def paste_tables(
         cls,
         workbook_path: str,
         tables: Dict[str, Tuple[BalanceTableCapture, str]],
-    ) -> None:
-        # A disconnected COM proxy cannot be revived by retrying the same
-        # worksheet/workbook object. Start a fresh Excel instance and replay
-        # the deterministic table replacement instead.
-        for attempt in range(3):
-            try:
-                return cls._paste_tables_once(workbook_path, tables)
-            except pywintypes.com_error as exc:
-                error_code = exc.args[0] if exc.args else None
-                if (
-                    error_code not in cls.COM_DISCONNECTED_ERRORS
-                    or attempt == 2
-                ):
-                    raise
-                time.sleep(cls.COM_RETRY_DELAY_SECONDS * (attempt + 1))
-
-    @classmethod
-    def _paste_tables_once(
-        cls,
-        workbook_path: str,
-        tables: Dict[str, Tuple[BalanceTableCapture, str]],
-    ) -> None:
+    ) -> List[str]:
+        """Write all captured balance tables directly to the workbook using openpyxl."""
         if not tables:
-            return
+            return []
 
-        source_workbook = None
+        workbook = None
         for attempt in range(cls.FILE_ACCESS_RETRY_ATTEMPTS):
             try:
-                source_workbook = openpyxl.load_workbook(
+                workbook = openpyxl.load_workbook(
                     workbook_path, read_only=False, data_only=False
                 )
                 break
@@ -343,216 +451,144 @@ class ExcelTablePaster:
                         "to finish syncing, then retry."
                     ) from exc
                 time.sleep(cls.FILE_ACCESS_RETRY_DELAY_SECONDS)
-        merged_rows = {}
-        start_positions = {}
+
+        assert workbook is not None
         try:
-            for sheet_name, (_, start_cell) in tables.items():
-                worksheet = source_workbook[sheet_name]
+            for sheet_name, (capture, start_cell) in tables.items():
+                worksheet = workbook[sheet_name]
                 start = worksheet[start_cell]
-                start_positions[sheet_name] = (start.row, start.column)
-                last_column = start.column + tables[sheet_name][0].column_count - 1
-                merged_rows[sheet_name] = max(
+                top_row, left_column = start.row, start.column
+                right_column = left_column + capture.column_count - 1
+                pasted_last_row = top_row + capture.row_count - 1
+
+                if sheet_name == "BO_provider_balance" and top_row == 6:
+                    for col in range(1, 9):
+                        worksheet.cell(5, col).value = None
+                    for col in range(11, 21):
+                        worksheet.cell(5, col).value = None
+
+                merged_max_row = max(
                     (
                         cell_range.max_row
                         for cell_range in worksheet.merged_cells.ranges
-                        if cell_range.min_col <= last_column
-                        and cell_range.max_col >= start.column
+                        if cell_range.min_col <= right_column
+                        and cell_range.max_col >= left_column
                     ),
                     default=0,
                 )
-        finally:
-            source_workbook.close()
+                data_max_row = 0
+                for row_idx in range(top_row, worksheet.max_row + 1):
+                    for col_idx in range(left_column, right_column + 1):
+                        cell = worksheet.cell(row_idx, col_idx)
+                        if cell.value is not None or (
+                            cell.border
+                            and any(
+                                getattr(cell.border, side)
+                                and getattr(cell.border, side).style is not None
+                                for side in ("top", "bottom", "left", "right")
+                            )
+                        ):
+                            data_max_row = row_idx
+                            break
 
-        excel = win32com.client.gencache.EnsureDispatch(
-            win32com.client.DispatchEx("Excel.Application")
-        )
-        cls._retry_excel_call(lambda: setattr(excel, "Visible", False))
-        cls._retry_excel_call(lambda: setattr(excel, "DisplayAlerts", False))
-        workbook = None
-        saved = False
-        try:
-            workbook = cls._retry_excel_call(
-                lambda: excel.Workbooks.Open(
-                    os.path.abspath(workbook_path),
-                    UpdateLinks=0,
-                    ReadOnly=False,
-                )
-            )
-            for sheet_name, (capture, start_cell) in tables.items():
-                worksheet = cls._retry_excel_call(
-                    lambda: workbook.Worksheets(sheet_name)
-                )
-                top_left = cls._retry_excel_call(
-                    lambda: worksheet.Range(start_cell)
-                )
-                top_row, left_column = start_positions[sheet_name]
-                if sheet_name == "BO_provider_balance" and top_row == 6:
-                    empty_header = cls._retry_excel_call(
-                        lambda: worksheet.Range("A5:H5")
-                    )
-                    cls._retry_excel_call(
-                        lambda: empty_header.ClearContents()
-                    )
-                    helper_header = cls._retry_excel_call(
-                        lambda: worksheet.Range("K5:T5")
-                    )
-                    cls._retry_excel_call(
-                        lambda: helper_header.ClearContents()
-                    )
-                last_existing_row = max(
-                    top_row + capture.row_count - 1,
-                    merged_rows[sheet_name],
-                )
-                for column in range(
-                    left_column,
-                    left_column + capture.column_count,
-                ):
-                    existing_last = cls._retry_excel_call(
-                        lambda: worksheet.Cells(
-                            worksheet.Rows.Count, column
-                        ).End(-4162).Row
-                    )
-                    last_existing_row = max(last_existing_row, existing_last)
+                last_existing_row = max(pasted_last_row, merged_max_row, data_max_row)
 
-                clear_range = cls._retry_excel_call(
-                    lambda: worksheet.Range(
-                        top_left,
-                        worksheet.Cells(
-                            last_existing_row,
-                            left_column + capture.column_count - 1,
-                        ),
-                    ),
+                # Unmerge any existing merged cells in the target + stale tail region
+                cls._unmerge_intersecting(
+                    worksheet, top_row, last_existing_row, left_column, right_column
                 )
-                cls._retry_excel_call(lambda: clear_range.UnMerge())
-                cls._retry_excel_call(lambda: clear_range.ClearContents())
-                cls._paste_html_table(worksheet, top_left, capture)
-                worksheet = cls._retry_excel_call(
-                    lambda: workbook.Worksheets(sheet_name)
+
+                # Clear target + stale tail region cleanly (values, borders, fills, alignments)
+                empty_border = Border(
+                    top=Side(style=None),
+                    bottom=Side(style=None),
+                    left=Side(style=None),
+                    right=Side(style=None),
                 )
-                pasted_last_row = top_row + capture.row_count - 1
-                bottom_right = cls._retry_excel_call(
-                    lambda: worksheet.Cells(
-                        pasted_last_row,
-                        left_column + capture.column_count - 1,
+                empty_fill = PatternFill(fill_type=None)
+                default_alignment = Alignment()
+                for row_idx in range(top_row, last_existing_row + 1):
+                    for col_idx in range(left_column, right_column + 1):
+                        cell = worksheet.cell(row_idx, col_idx)
+                        cell.value = None
+                        cell.border = copy(empty_border)
+                        cell.fill = copy(empty_fill)
+                        cell.alignment = copy(default_alignment)
+                        cell.number_format = "General"
+
+                matrix = cls._cell_matrix(capture)
+                html_styles = cls._parse_html_styles(capture)
+                amount_columns = cls.AMOUNT_COLUMNS.get(sheet_name)
+
+                for row_offset, row_values in enumerate(matrix):
+                    excel_row = top_row + row_offset
+                    raw_row = capture.rows[row_offset] if row_offset < len(capture.rows) else {}
+                    row_classes = raw_row.get("row_class", "").split()
+                    is_header_row = "headers-row" in row_classes
+                    style_row = (
+                        html_styles[row_offset] if row_offset < len(html_styles) else []
                     )
-                )
-                pasted_range = cls._retry_excel_call(
-                    lambda: worksheet.Range(
-                        worksheet.Cells(top_row, left_column), bottom_right
-                    )
-                )
-                cls._retry_excel_call(lambda: pasted_range.UnMerge())
-                # Pasting HTML and unmerging cells can invalidate a worksheet
-                # proxy even though Excel still has the sheet open. Reacquire it
-                # after those operations, and retry once with a fresh proxy if
-                # Excel reports VBA's "Object required" error.
-                worksheet = cls._retry_excel_call(
-                    lambda: workbook.Worksheets(sheet_name)
-                )
-                try:
-                    cls._write_captured_cells(
-                        worksheet, top_row, left_column, capture
-                    )
-                except pywintypes.com_error as exc:
-                    error_code = exc.args[0] if exc.args else None
-                    if error_code != -2146827864:
-                        raise
-                    worksheet = cls._retry_excel_call(
-                        lambda: workbook.Worksheets(sheet_name)
-                    )
-                    try:
-                        cls._write_captured_cells(
-                            worksheet, top_row, left_column, capture
+
+                    for col_offset, raw_text in enumerate(row_values):
+                        excel_col = left_column + col_offset
+                        cell = worksheet.cell(excel_row, excel_col)
+                        css = style_row[col_offset] if col_offset < len(style_row) else {}
+
+                        is_amount_col = (
+                            amount_columns is not None
+                            and amount_columns[0] <= col_offset < amount_columns[1]
                         )
-                    except pywintypes.com_error as retry_exc:
-                        raise RuntimeError(
-                            f"Excel could not write captured values to "
-                            f"{sheet_name}!{start_cell} after reacquiring the worksheet."
-                        ) from retry_exc
-                if sheet_name == "BO_provider_balance":
-                    cls._retry_excel_call(
-                        lambda: setattr(
-                            worksheet.Rows(f"{top_row}:{last_existing_row}"),
-                            "RowHeight",
-                            13,
+
+                        if is_amount_col and not is_header_row:
+                            if str(raw_text).strip():
+                                cell.value = cls._parse_amount(str(raw_text))
+                            else:
+                                cell.value = None
+                            cell.number_format = cls.AMOUNT_NUMBER_FORMAT
+                        else:
+                            cell.value = raw_text if raw_text != "" else None
+
+                        wrap_text = isinstance(raw_text, str) and (
+                            "\n" in raw_text or "\r" in raw_text
                         )
-                    )
-                if pasted_last_row < last_existing_row:
-                    stale_tail = cls._retry_excel_call(
-                        lambda: worksheet.Range(
-                            worksheet.Cells(
-                                pasted_last_row + 1, left_column
-                            ),
-                            worksheet.Cells(
-                                last_existing_row,
-                                left_column + capture.column_count - 1,
-                            ),
-                        ),
-                    )
-                    cls._retry_excel_call(lambda: stale_tail.UnMerge())
-                    cls._retry_excel_call(lambda: stale_tail.ClearContents())
-                    cls._retry_excel_call(
-                        lambda: setattr(
-                            stale_tail.Borders,
-                            "LineStyle",
-                            cls.XL_NONE,
-                        )
-                    )
-                worksheet = cls._retry_excel_call(
-                    lambda: workbook.Worksheets(sheet_name)
-                )
-                cls._write_numeric_amounts(
-                    worksheet, sheet_name, capture, top_row, left_column
-                )
+                        cls._apply_css_style(cell, css, wrap_text)
+
+                        # Keep amounts right-aligned unless CSS explicitly overrides
+                        if is_amount_col and not is_header_row and not css.get("text-align"):
+                            cell.alignment = Alignment(
+                                horizontal="right",
+                                vertical=cell.alignment.vertical,
+                                wrap_text=cell.alignment.wrap_text,
+                            )
+
+                # Apply canonical helper number format to helper columns (rows 5..pasted_last_row)
                 helper_columns = cls.HELPER_FORMAT_COLUMNS.get(sheet_name)
                 if helper_columns and pasted_last_row >= cls.FIRST_FORMULA_ROW:
-                    helper_range = cls._retry_excel_call(
-                        lambda: worksheet.Range(
-                            worksheet.Cells(
-                                5, helper_columns[0]
-                            ),
-                            worksheet.Cells(
-                                pasted_last_row, helper_columns[1]
-                            ),
-                        )
-                    )
-                    cls._retry_excel_call(
-                        lambda: setattr(
-                            helper_range,
-                            "NumberFormatLocal",
-                            cls.HELPER_NUMBER_FORMAT_LOCAL,
-                        )
-                    )
-                if sheet_name == "BO_merchant_balance":
-                    cls._retry_excel_call(
-                        lambda: setattr(
-                            worksheet.Rows(f"{top_row}:{last_existing_row}"),
-                            "RowHeight",
-                            13,
-                        )
-                    )
-            cls._retry_excel_call(lambda: workbook.Save())
-            saved = True
+                    for row_idx in range(5, pasted_last_row + 1):
+                        for col_idx in range(helper_columns[0], helper_columns[1] + 1):
+                            worksheet.cell(
+                                row_idx, col_idx
+                            ).number_format = cls.HELPER_NUMBER_FORMAT_CANONICAL
+
+                # Ensure amount/helper columns have enough width to display formatted numbers
+                # on fresh worksheets without altering custom widths on existing workbooks.
+                if amount_columns is not None:
+                    for col_offset in range(amount_columns[0], amount_columns[1]):
+                        col_letter = get_column_letter(left_column + col_offset)
+                        if col_letter not in worksheet.column_dimensions:
+                            worksheet.column_dimensions[col_letter].width = 22
+                if helper_columns and pasted_last_row >= cls.FIRST_FORMULA_ROW:
+                    for col_idx in range(helper_columns[0], helper_columns[1] + 1):
+                        col_letter = get_column_letter(col_idx)
+                        if col_letter not in worksheet.column_dimensions:
+                            worksheet.column_dimensions[col_letter].width = 16
+
+                # Normalize row height across the written and cleared tail rows
+                if sheet_name in ("BO_merchant_balance", "BO_provider_balance"):
+                    for row_idx in range(top_row, last_existing_row + 1):
+                        worksheet.row_dimensions[row_idx].height = cls.DEFAULT_ROW_HEIGHT
+
+            workbook.save(workbook_path)
+            return []
         finally:
-            active_exception = sys.exc_info()[0] is not None
-            cleanup_error = None
-            try:
-                if workbook is not None:
-                    try:
-                        cls._retry_excel_call(
-                            lambda: workbook.Close(SaveChanges=saved)
-                        )
-                    except pywintypes.com_error as exc:
-                        if exc.args[0] not in cls.COM_DISCONNECTED_ERRORS:
-                            raise
-                        cleanup_error = exc
-            finally:
-                try:
-                    cls._retry_excel_call(lambda: excel.Quit())
-                except pywintypes.com_error as exc:
-                    if exc.args[0] not in cls.COM_DISCONNECTED_ERRORS:
-                        raise
-                    if cleanup_error is None:
-                        cleanup_error = exc
-            if cleanup_error is not None and not active_exception:
-                raise cleanup_error
+            workbook.close()

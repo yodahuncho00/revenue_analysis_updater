@@ -93,16 +93,20 @@ run, but does not roll back an already committed local workbook:
 python main.py
 ```
 
-For Google Sheets access, keep the service-account JSON key in the project folder
-as configured in `config.yaml`; do not commit or share the key. The Drive folder
-must be shared with that service account as an Editor, and both the Google Drive
-API and Google Sheets API must be enabled for its Cloud project. `Backoffice_POS`
-receives payment data in `BO_extract!A3:R`; the Gateway target tabs are listed in
-`google_sheets.gateway_tabs`. The local Gateway tab is named `BO_merchant_balance`
-(singular); source-to-destination tab mappings are configurable there. On managed networks
-that intercept HTTPS, the default bundle includes certifi and the Windows trusted
-root store. A custom trusted PEM bundle can be set with `google_sheets.ca_bundle`;
-do not disable certificate verification.
+For Google Sheets access, configure user OAuth in `config.yaml`. Keep the
+downloaded Desktop OAuth client JSON and generated refresh-token file under the
+user's local application-data directory; do not commit or share them. The first
+full run opens a browser so the account can authorize the app. The authorizing
+user needs Editor access to the Drive folder and spreadsheets, and both the
+Google Drive API and Google Sheets API must be enabled in the approved Cloud
+project. Before the first production run, authorize the account with
+`python scripts\authorize_google_sheets.py`. `Backoffice_POS` receives payment
+data in `BO_extract!A3:R`; the Gateway
+target tabs are listed in `google_sheets.gateway_tabs`. The local Gateway tab is
+named `BO_merchant_balance` (singular); source-to-destination tab mappings are
+configurable there. On managed networks that intercept HTTPS, the default bundle
+includes certifi and the Windows trusted root store. A custom trusted PEM bundle
+can be set with `google_sheets.ca_bundle`; do not disable certificate verification.
 
 ### 1.4 Backfill or Run for a Specific Date
 Re-runs or backfills the pipeline for an explicit as-of date (calculates `to_date = D - 1`):
@@ -200,7 +204,7 @@ computer becomes available, if Windows permits it.
 | `ReconciliationError: Row count mismatch between BO_extract and Data` | The number of `Filter == 1` rows does not match rows written to `Data`. | Check `data/reports/<run_id>.json` diagnostics. |
 | `ReconciliationError: Control strict gate failed` | A core accounting identity on `Control` (rows 68, 74–78) failed to foot. | Inspect `Control` tab formula checks. |
 | `Mapping notice at row 69: Add merchant to Merchant_master` | A new merchant appeared in Backoffice that has not been mapped yet. | Informational notice: open `Merchant_master` and map the new merchant name in Column B. |
-| Google Drive/Sheets permission, file, or tab error | Local workbook committed, but the configured remote mirror did not complete. | Check the service-account key path, share the configured folder with the service account as Editor, enable both APIs, and confirm the configured spreadsheet and tab names. Rerun the normal full pipeline to retry the mirror. |
+| Google Drive/Sheets permission, file, or tab error | Local workbook committed, but the configured remote mirror did not complete. | Check the OAuth client and token paths, confirm the authorizing user can edit the configured folder and spreadsheets, enable both APIs, and confirm the configured spreadsheet and tab names. If the token was revoked, remove the configured token file and rerun interactively to authorize again. |
 
 ---
 

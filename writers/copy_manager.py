@@ -5,6 +5,7 @@ import sys
 import ctypes
 import re
 import tempfile
+import time
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -13,6 +14,12 @@ class CopyManagerError(Exception):
 
 class CopyManager:
     """Manages run lock, working copy isolation, timestamped backups, and atomic commit."""
+
+    COMMIT_RETRY_ATTEMPTS = 10
+    COMMIT_RETRY_BASE_DELAY_SECONDS = 0.5
+    IO_RETRY_ATTEMPTS = 5
+    IO_RETRY_DELAY_SECONDS = 1.0
+    TRANSIENT_WINERRORS = {5, 32, 33}  # ACCESS_DENIED, SHARING_VIOLATION, LOCK_VIOLATION
 
     def __init__(
         self,
@@ -26,20 +33,47 @@ class CopyManager:
         self.backups_to_retain = backups_to_retain
         self.lock_file = f"{self.prod_path}.lock"
         local_data = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-        run_suffix = run_id or f"pid_{os.getpid()}"
+        self.run_suffix = run_id or f"pid_{os.getpid()}"
         self.working_copy_dir = os.path.join(
             local_data, "RevenueAnalysisUpdater", "WorkingCopies"
         )
         self.working_copy_path = os.path.join(
             self.working_copy_dir,
             f"{os.path.splitext(os.path.basename(self.prod_path))[0]}"
-            f"_{run_suffix}.working.xlsx",
+            f"_{self.run_suffix}.working.xlsx",
         )
         self.legacy_working_copy_path = f"{self.prod_path}.working.xlsx"
         self.is_locked = False
         self._mutex_handle = None
         self._lock_fd = None
         os.makedirs(self.backup_dir, exist_ok=True)
+
+    @classmethod
+    def _is_transient_file_lock(cls, exc: OSError) -> bool:
+        if isinstance(exc, PermissionError):
+            return True
+        return getattr(exc, "winerror", None) in cls.TRANSIENT_WINERRORS
+
+    def verify_target_writable(self, attempts: Optional[int] = None) -> None:
+        """Fail fast if the production workbook is open in Excel or persistently locked."""
+        max_attempts = attempts or self.IO_RETRY_ATTEMPTS
+        last_exc: Optional[OSError] = None
+        for attempt in range(max_attempts):
+            try:
+                with open(self.prod_path, "r+b"):
+                    return
+            except OSError as exc:
+                if not self._is_transient_file_lock(exc):
+                    raise CopyManagerError(
+                        f"Cannot access production workbook {self.prod_path}: {exc}"
+                    ) from exc
+                last_exc = exc
+                if attempt < max_attempts - 1:
+                    time.sleep(self.IO_RETRY_DELAY_SECONDS)
+        raise CopyManagerError(
+            f"Workbook is locked or currently open in Excel/OneDrive: {self.prod_path} "
+            f"({last_exc}). Close Excel or wait for OneDrive sync, then retry."
+        ) from last_exc
 
     @staticmethod
     def compute_sha256(filepath: str) -> str:
@@ -178,7 +212,14 @@ class CopyManager:
         backup_name = f"{base_name}_{ts}.xlsx"
         backup_path = os.path.join(self.backup_dir, backup_name)
 
-        shutil.copy2(self.prod_path, backup_path)
+        for attempt in range(self.IO_RETRY_ATTEMPTS):
+            try:
+                shutil.copy2(self.prod_path, backup_path)
+                break
+            except OSError as exc:
+                if not self._is_transient_file_lock(exc) or attempt == self.IO_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(self.IO_RETRY_DELAY_SECONDS)
         sha256_hash = self.compute_sha256(backup_path)
 
         # Cleanup old backups
@@ -209,28 +250,63 @@ class CopyManager:
                 os.remove(self.working_copy_path)
             except Exception:
                 pass
-        shutil.copy2(self.prod_path, self.working_copy_path)
+        for attempt in range(self.IO_RETRY_ATTEMPTS):
+            try:
+                shutil.copy2(self.prod_path, self.working_copy_path)
+                break
+            except OSError as exc:
+                if not self._is_transient_file_lock(exc) or attempt == self.IO_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(self.IO_RETRY_DELAY_SECONDS)
         return self.working_copy_path
 
     def commit(self) -> None:
         """
-        Atomically commits working copy to production:
-        1. Verifies working copy exists and is readable.
-        2. Renames working copy to replace production workbook via os.replace (atomic on Windows/POSIX).
+        Atomically commits working copy to production with retry/backoff for
+        transient OneDrive sync / antivirus file locks on Windows.
         """
         if not os.path.exists(self.working_copy_path):
             raise CopyManagerError(f"Working copy not found for commit: {self.working_copy_path}")
 
-        # Flush buffers
+        # Flush working copy buffers
         with open(self.working_copy_path, "r+b") as f:
             f.flush()
             os.fsync(f.fileno())
 
-        temp_target = f"{self.prod_path}.tmp"
-        shutil.copy2(self.working_copy_path, temp_target)
-        
-        # Atomic replace
-        os.replace(temp_target, self.prod_path)
+        prod_dir = os.path.dirname(self.prod_path)
+        prod_name = os.path.basename(self.prod_path)
+        temp_target = os.path.join(prod_dir, f".{prod_name}.{self.run_suffix}.tmp")
+
+        try:
+            shutil.copy2(self.working_copy_path, temp_target)
+            with open(temp_target, "r+b") as f:
+                f.flush()
+                os.fsync(f.fileno())
+
+            last_exc: Optional[OSError] = None
+            for attempt in range(self.COMMIT_RETRY_ATTEMPTS):
+                try:
+                    os.replace(temp_target, self.prod_path)
+                    return
+                except OSError as exc:
+                    if not self._is_transient_file_lock(exc):
+                        raise
+                    last_exc = exc
+                    if attempt < self.COMMIT_RETRY_ATTEMPTS - 1:
+                        time.sleep(self.COMMIT_RETRY_BASE_DELAY_SECONDS * (attempt + 1))
+
+            raise CopyManagerError(
+                f"Could not replace production workbook {self.prod_path} after "
+                f"{self.COMMIT_RETRY_ATTEMPTS} attempts ({last_exc}). "
+                "Close the workbook in Excel or wait for OneDrive sync, then retry with --resume."
+            ) from last_exc
+        except Exception:
+            if os.path.exists(temp_target):
+                try:
+                    os.remove(temp_target)
+                except OSError:
+                    pass
+            raise
 
     def cleanup_working_copy(self) -> list[str]:
         """Delete this run's and any legacy project-folder working copies."""

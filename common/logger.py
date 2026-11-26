@@ -16,7 +16,12 @@ class SecretFilter(logging.Filter):
                 record.msg = record.msg.replace(s, "******")
         return True
 
-def setup_logger(run_id: Optional[str] = None, log_dir: str = "data/logs", secrets=None) -> Tuple[logging.Logger, str]:
+def setup_logger(
+    run_id: Optional[str] = None,
+    log_dir: str = "data/logs",
+    secrets=None,
+    source: Optional[str] = None,
+) -> Tuple[logging.Logger, str]:
     if run_id is None:
         run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
@@ -24,6 +29,13 @@ def setup_logger(run_id: Optional[str] = None, log_dir: str = "data/logs", secre
     log_file = os.path.join(log_dir, f"{run_id}.log")
     with open(os.path.join(log_dir, "latest_run.txt"), "w", encoding="utf-8") as run_file:
         run_file.write(f"{run_id}\n")
+    if source:
+        safe_source = "".join(ch for ch in source.lower() if ch.isalnum() or ch in ("_", "-"))
+        if safe_source:
+            with open(
+                os.path.join(log_dir, f"latest_run_{safe_source}.txt"), "w", encoding="utf-8"
+            ) as source_run_file:
+                source_run_file.write(f"{run_id}\n")
 
     logger = logging.getLogger(run_id)
     logger.setLevel(logging.DEBUG)

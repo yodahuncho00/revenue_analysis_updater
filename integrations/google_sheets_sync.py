@@ -20,8 +20,10 @@ SCOPES = (
 SPREADSHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
 FORMAT_BATCH_SIZE = 1000
 VALUE_BATCH_ROWS = 1000
-MAX_RATE_LIMIT_RETRIES = 2
+MAX_RATE_LIMIT_RETRIES = 3
 RATE_LIMIT_RETRY_SECONDS = 60
+TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
+TRANSIENT_RETRY_BASE_SECONDS = 3.0
 
 
 def _google_ca_bundle(settings: Dict[str, Any], project_root: str) -> str:
@@ -78,6 +80,159 @@ def _google_ca_bundle(settings: Dict[str, Any], project_root: str) -> str:
             if os.path.exists(temporary_path):
                 os.remove(temporary_path)
     return bundle_path
+
+
+def _configured_path(path: str, project_root: str, setting_name: str) -> str:
+    resolved_path = os.path.expandvars(os.path.expanduser(path))
+    if "%" in resolved_path:
+        raise ValueError(
+            f"Could not resolve {setting_name}; check environment variables in its path."
+        )
+    if not os.path.isabs(resolved_path):
+        resolved_path = os.path.join(project_root, resolved_path)
+    return os.path.abspath(resolved_path)
+
+
+OAUTH_REFRESH_RETRIES = 3
+OAUTH_REFRESH_BASE_DELAY_SECONDS = 2.0
+OAUTH_INTERACTIVE_TIMEOUT_SECONDS = 300
+
+
+def _refresh_oauth_credentials(credentials: Any, ca_bundle: str) -> None:
+    """Refresh an expired OAuth token with retries on transient network errors."""
+    import requests
+    from google.auth.exceptions import RefreshError, TransportError
+    from google.auth.transport.requests import Request
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(OAUTH_REFRESH_RETRIES):
+        session = requests.Session()
+        session.verify = ca_bundle
+        try:
+            credentials.refresh(Request(session=session))
+            return
+        except RefreshError:
+            raise
+        except (TransportError, requests.exceptions.RequestException, TimeoutError, OSError) as exc:
+            if isinstance(exc, (ssl.SSLError, requests.exceptions.SSLError)):
+                raise
+            last_exc = exc
+            if attempt == OAUTH_REFRESH_RETRIES - 1:
+                raise
+            time_module.sleep(OAUTH_REFRESH_BASE_DELAY_SECONDS * (attempt + 1))
+        finally:
+            session.close()
+    if last_exc is not None:
+        raise last_exc
+
+
+def _oauth_user_credentials(
+    settings: Dict[str, Any],
+    project_root: str,
+    *,
+    allow_interactive: bool = False,
+    force_reauth: bool = False,
+):
+    client_file = settings.get("oauth_client_file")
+    token_file = settings.get("oauth_token_file")
+    if not client_file or not token_file:
+        raise ValueError(
+            "Configure google_sheets.oauth_client_file and "
+            "google_sheets.oauth_token_file for OAuth user authentication."
+        )
+
+    client_path = _configured_path(
+        client_file, project_root, "google_sheets.oauth_client_file"
+    )
+    token_path = _configured_path(
+        token_file, project_root, "google_sheets.oauth_token_file"
+    )
+    if not os.path.isfile(client_path):
+        raise FileNotFoundError(
+            f"Google OAuth desktop client file not found: {client_path}"
+        )
+
+    try:
+        from google.auth.exceptions import RefreshError
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError as exc:
+        raise RuntimeError(
+            "Google user OAuth requires google-auth-oauthlib. "
+            "Install the project requirements and retry."
+        ) from exc
+
+    ca_bundle = _google_ca_bundle(settings, project_root)
+    credentials = None
+    needs_save = False
+    if not force_reauth and os.path.isfile(token_path):
+        credentials = Credentials.from_authorized_user_file(
+            token_path, scopes=SCOPES
+        )
+        if credentials.expired and credentials.refresh_token:
+            try:
+                _refresh_oauth_credentials(credentials, ca_bundle)
+                needs_save = True
+            except RefreshError as exc:
+                if not allow_interactive:
+                    raise RuntimeError(
+                        "The saved Google OAuth token could not be refreshed (expired or revoked; "
+                        "if your Google Cloud OAuth app is in 'Testing' status, tokens expire every 7 days). "
+                        "Run '.venv\\Scripts\\python.exe scripts\\authorize_google_sheets.py' to re-authorize, "
+                        "then retry with '--resume'."
+                    ) from exc
+                credentials = None
+
+    if credentials is None or not credentials.valid:
+        if not allow_interactive:
+            raise RuntimeError(
+                f"Google OAuth token is missing or invalid ({token_path}) and interactive login "
+                "is disabled during automated ETL runs. Run "
+                "'.venv\\Scripts\\python.exe scripts\\authorize_google_sheets.py' interactively, "
+                "then retry with '--resume'."
+            )
+        os.makedirs(os.path.dirname(token_path), exist_ok=True)
+        flow = InstalledAppFlow.from_client_secrets_file(
+            client_path, scopes=SCOPES
+        )
+        flow.oauth2session.verify = ca_bundle
+        credentials = flow.run_local_server(
+            port=0,
+            access_type="offline",
+            prompt="select_account consent",
+            timeout_seconds=OAUTH_INTERACTIVE_TIMEOUT_SECONDS,
+        )
+        if not getattr(credentials, "refresh_token", None):
+            raise RuntimeError(
+                "Google OAuth authorization succeeded without returning a refresh_token. "
+                "Revoke existing app access in your Google Account security settings and "
+                "re-run 'scripts\\authorize_google_sheets.py --force'."
+            )
+        needs_save = True
+
+    if needs_save:
+        os.makedirs(os.path.dirname(token_path), exist_ok=True)
+        file_descriptor, temporary_path = tempfile.mkstemp(
+            prefix="google-oauth-", suffix=".json", dir=os.path.dirname(token_path)
+        )
+        try:
+            with os.fdopen(file_descriptor, "w", encoding="utf-8") as token_stream:
+                token_stream.write(credentials.to_json())
+                token_stream.flush()
+                os.fsync(token_stream.fileno())
+            for attempt in range(5):
+                try:
+                    os.replace(temporary_path, token_path)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time_module.sleep(0.25 * (attempt + 1))
+        finally:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+
+    return credentials
 
 
 def _a1_sheet_name(title: str) -> str:
@@ -339,29 +494,19 @@ class GoogleSheetsSync:
         *,
         drive_service: Any = None,
         sheets_service: Any = None,
+        allow_interactive: bool = False,
+        force_reauth: bool = False,
     ):
         settings = config.get("google_sheets", {})
         self.folder_id = settings.get("folder_id")
         if not self.folder_id:
             raise ValueError("Configure google_sheets.folder_id.")
 
-        credentials_path = settings.get("service_account_file")
-        if not credentials_path:
-            raise ValueError("Configure google_sheets.service_account_file.")
-        if not os.path.isabs(credentials_path):
-            project_root = config.get("_project_root", os.getcwd())
-            credentials_path = os.path.join(project_root, credentials_path)
-        if not os.path.isfile(credentials_path):
-            raise FileNotFoundError(
-                f"Google service-account key not found: {os.path.abspath(credentials_path)}"
-            )
-
         self.drive_service = drive_service
         self.sheets_service = sheets_service
         if self.drive_service is None or self.sheets_service is None:
             try:
                 import httplib2
-                from google.oauth2.service_account import Credentials
                 from google_auth_httplib2 import AuthorizedHttp
                 from googleapiclient.discovery import build
             except ImportError as exc:
@@ -369,9 +514,40 @@ class GoogleSheetsSync:
                     "Google Sheets sync requires certifi, google-api-python-client, "
                     "google-auth, and google-auth-httplib2."
                 ) from exc
-            credentials = Credentials.from_service_account_file(
-                credentials_path, scopes=SCOPES
-            )
+            auth_type = settings.get("auth_type", "service_account")
+            if auth_type == "oauth_user":
+                credentials = _oauth_user_credentials(
+                    settings,
+                    config.get("_project_root", os.getcwd()),
+                    allow_interactive=allow_interactive,
+                    force_reauth=force_reauth,
+                )
+            elif auth_type == "service_account":
+                credentials_path = settings.get("service_account_file")
+                if not credentials_path:
+                    raise ValueError(
+                        "Configure google_sheets.service_account_file for "
+                        "service-account authentication."
+                    )
+                credentials_path = _configured_path(
+                    credentials_path,
+                    config.get("_project_root", os.getcwd()),
+                    "google_sheets.service_account_file",
+                )
+                if not os.path.isfile(credentials_path):
+                    raise FileNotFoundError(
+                        f"Google service-account key not found: {credentials_path}"
+                    )
+                from google.oauth2.service_account import Credentials
+
+                credentials = Credentials.from_service_account_file(
+                    credentials_path, scopes=SCOPES
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported google_sheets.auth_type {auth_type!r}; "
+                    "use 'oauth_user' or 'service_account'."
+                )
             ca_bundle = _google_ca_bundle(
                 settings, config.get("_project_root", os.getcwd())
             )
@@ -400,27 +576,54 @@ class GoogleSheetsSync:
             try:
                 return request.execute()
             except HttpError as exc:
-                if getattr(getattr(exc, "resp", None), "status", None) != 429:
+                status = getattr(getattr(exc, "resp", None), "status", None)
+                if status not in TRANSIENT_HTTP_STATUSES:
                     raise
                 if attempt == MAX_RATE_LIMIT_RETRIES:
                     raise
-                retry_after = getattr(exc, "resp", {}).get("retry-after")
-                try:
-                    delay = (
-                        max(float(retry_after), 1.0)
-                        if retry_after
-                        else RATE_LIMIT_RETRY_SECONDS
-                    )
-                except (TypeError, ValueError):
-                    delay = RATE_LIMIT_RETRY_SECONDS
+                if status == 429:
+                    retry_after = getattr(exc, "resp", {}).get("retry-after")
+                    try:
+                        delay = (
+                            max(float(retry_after), 1.0)
+                            if retry_after
+                            else RATE_LIMIT_RETRY_SECONDS
+                        )
+                    except (TypeError, ValueError):
+                        delay = RATE_LIMIT_RETRY_SECONDS
+                    if logger:
+                        logger.warning(
+                            "Google Sheets write quota reached; retrying after %.0f seconds.",
+                            delay,
+                        )
+                else:
+                    delay = TRANSIENT_RETRY_BASE_SECONDS * (attempt + 1)
+                    if logger:
+                        logger.warning(
+                            "Google API transient HTTP %s; retrying in %.1f seconds (%d/%d).",
+                            status,
+                            delay,
+                            attempt + 1,
+                            MAX_RATE_LIMIT_RETRIES,
+                        )
+                time_module.sleep(delay)
+            except (TimeoutError, ConnectionError, OSError) as exc:
+                if isinstance(exc, ssl.SSLError):
+                    raise
+                if attempt == MAX_RATE_LIMIT_RETRIES:
+                    raise
+                delay = TRANSIENT_RETRY_BASE_SECONDS * (attempt + 1)
                 if logger:
                     logger.warning(
-                        "Google Sheets write quota reached; retrying after %.0f seconds.",
+                        "Google API transient network error (%s); retrying in %.1f seconds (%d/%d).",
+                        exc,
                         delay,
+                        attempt + 1,
+                        MAX_RATE_LIMIT_RETRIES,
                     )
                 time_module.sleep(delay)
 
-    def _find_spreadsheet(self, title: str) -> str:
+    def _find_spreadsheet(self, title: str, logger: Any = None) -> str:
         escaped_title = title.replace("\\", "\\\\").replace("'", "\\'")
         query = (
             f"'{self.folder_id}' in parents and name = '{escaped_title}' "
@@ -429,12 +632,15 @@ class GoogleSheetsSync:
         files = []
         page_token = None
         while True:
-            response = self.drive_service.files().list(
-                q=query,
-                pageSize=100,
-                fields="nextPageToken,files(id,name)",
-                pageToken=page_token,
-            ).execute()
+            response = self._execute_write(
+                self.drive_service.files().list(
+                    q=query,
+                    pageSize=100,
+                    fields="nextPageToken,files(id,name)",
+                    pageToken=page_token,
+                ),
+                logger,
+            )
             files.extend(response.get("files", []))
             page_token = response.get("nextPageToken")
             if not page_token:
@@ -447,12 +653,15 @@ class GoogleSheetsSync:
             )
         return files[0]["id"]
 
-    def _spreadsheet_sheets(self, spreadsheet_id: str) -> Dict[str, Dict[str, Any]]:
-        spreadsheet = self.sheets_service.spreadsheets().get(
-            spreadsheetId=spreadsheet_id,
-            includeGridData=False,
-            fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
-        ).execute()
+    def _spreadsheet_sheets(self, spreadsheet_id: str, logger: Any = None) -> Dict[str, Dict[str, Any]]:
+        spreadsheet = self._execute_write(
+            self.sheets_service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id,
+                includeGridData=False,
+                fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
+            ),
+            logger,
+        )
         return {
             sheet["properties"]["title"]: sheet["properties"]
             for sheet in spreadsheet.get("sheets", [])
@@ -616,8 +825,8 @@ class GoogleSheetsSync:
         *,
         logger: Any = None,
     ) -> None:
-        spreadsheet_id = self._find_spreadsheet(spreadsheet_title)
-        target_sheets = self._spreadsheet_sheets(spreadsheet_id)
+        spreadsheet_id = self._find_spreadsheet(spreadsheet_title, logger=logger)
+        target_sheets = self._spreadsheet_sheets(spreadsheet_id, logger=logger)
         workbook = openpyxl.load_workbook(
             workbook_path, data_only=True, read_only=False
         )
@@ -679,8 +888,8 @@ class GoogleSheetsSync:
         logger: Any = None,
     ) -> None:
         sheet_name = "BO_extract"
-        spreadsheet_id = self._find_spreadsheet(spreadsheet_title)
-        target_sheets = self._spreadsheet_sheets(spreadsheet_id)
+        spreadsheet_id = self._find_spreadsheet(spreadsheet_title, logger=logger)
+        target_sheets = self._spreadsheet_sheets(spreadsheet_id, logger=logger)
         if sheet_name not in target_sheets:
             raise ValueError(
                 f"Google spreadsheet {spreadsheet_title!r} has no tab {sheet_name!r}."

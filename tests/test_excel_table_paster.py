@@ -142,8 +142,8 @@ def test_provider_paste_keeps_multiline_accounts_in_cell_and_separator_aligned(
     assert all(pasted.cell(7, column).value is None for column in range(1, 9))
     assert pasted["A8"].value == "TZS"
     assert pasted["F8"].value == pytest.approx(30382668.77)
-    assert pasted.row_dimensions[6].height == pytest.approx(45)
-    assert pasted.row_dimensions[7].height == pytest.approx(21)
+    assert pasted.row_dimensions[6].height == pytest.approx(13)
+    assert pasted.row_dimensions[7].height == pytest.approx(13)
     updated.close()
 
 
@@ -403,3 +403,43 @@ def test_retries_excel_call_rejected_errors(monkeypatch):
 
     assert ExcelTablePaster._retry_excel_call(operation) == "complete"
     assert calls == 3
+
+
+def test_openpyxl_table_writer_handles_rgba_styles_without_com_or_clipboard(tmp_path):
+    workbook_path = tmp_path / "direct_write.xlsx"
+    workbook = openpyxl.Workbook()
+    workbook.active.title = "BO_merchant_balance"
+    workbook.save(workbook_path)
+    workbook.close()
+
+    capture = BalanceTableCapture(
+        rows=[
+            {
+                "row_class": "country-row",
+                "cells": ["Zambia", "ZMW", "", "1,000.50", "0.00", "1,000.50"],
+            }
+        ],
+        html=(
+            "<table><tbody><tr class='country-row'>"
+            "<td style='background-color: rgba(242, 169, 0, 0.7); font-weight: 700; text-align: left'>Zambia</td>"
+            "<td>ZMW</td><td></td><td>1,000.50</td><td>0.00</td><td>1,000.50</td>"
+            "</tr></tbody></table>"
+        ),
+        row_count=1,
+        column_count=6,
+    )
+
+    warnings = ExcelTablePaster.paste_tables(
+        str(workbook_path), {"BO_merchant_balance": (capture, "A4")}
+    )
+
+    assert warnings == []
+    updated = openpyxl.load_workbook(workbook_path, data_only=False)
+    ws = updated["BO_merchant_balance"]
+    assert ws["A4"].value == "Zambia"
+    assert ws["A4"].font.bold is True
+    assert ws["A4"].fill.fill_type == "solid"
+    assert ws["A4"].fill.fgColor.rgb == "FFF6C34D"
+    assert ws["D4"].value == pytest.approx(1000.50)
+    assert ws["D4"].alignment.horizontal == "right"
+    updated.close()

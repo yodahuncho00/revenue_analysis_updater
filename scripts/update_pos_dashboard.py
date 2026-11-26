@@ -4,6 +4,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -218,7 +219,16 @@ def update_pos_dashboard(workbook_path, template_path, dashboard_path):
             output.write(updated)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temp_name, dashboard_path)
+        for attempt in range(8):
+            try:
+                os.replace(temp_name, dashboard_path)
+                break
+            except OSError as exc:
+                if not (isinstance(exc, PermissionError) or getattr(exc, "winerror", None) in (5, 32, 33)):
+                    raise
+                if attempt == 7:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
     except Exception:
         if os.path.exists(temp_name):
             os.remove(temp_name)
