@@ -27,9 +27,9 @@ foreach ($oldName in @("Run Revenue Update.lnk", "Retry Revenue Update.lnk")) {
 $shortcutName = "Update and re-run.lnk"
 $shortcutPath = Join-Path $DesktopDir $shortcutName
 $lnk = $WshShell.CreateShortcut($shortcutPath)
-# Target the .bat file directly (avoids cmd.exe /c quote-stripping issues on paths with spaces/special chars)
-$lnk.TargetPath = $BatPath
-$lnk.Arguments = "--resume"
+# Launch via cmd.exe using WorkingDirectory + relative path so &, spaces, or () in $ProjectDir never break cmd /c parsing
+$lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
+$lnk.Arguments = "/c scripts\run_daily_etl.bat --resume"
 $lnk.WorkingDirectory = $ProjectDir
 $lnk.Description = "Pull latest fixes and run or resume today's Revenue Analysis update"
 if (Test-Path -LiteralPath $IconPath) {

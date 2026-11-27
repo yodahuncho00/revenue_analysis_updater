@@ -10,7 +10,7 @@ Write-Host "Registering Windows Scheduled Task: $TaskName"
 Write-Host "Working Directory: $ProjectDir"
 Write-Host "Batch Executable: $BatPath"
 
-$Action = New-ScheduledTaskAction -Execute $BatPath -WorkingDirectory $ProjectDir
+$Action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\cmd.exe" -Argument "/c scripts\run_daily_etl.bat" -WorkingDirectory $ProjectDir
 $Trigger = New-ScheduledTaskTrigger -Daily -At "09:11"
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
